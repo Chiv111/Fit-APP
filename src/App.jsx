@@ -2,6 +2,7 @@
 
 const SAVE_KEY = "lockin_state_v3";
 const BACKUP_KEY = "lockin_backups_v3";
+const DRAFT_KEY = "lockin_routine_drafts_v1";
 const LEGACY_KEYS = ["lockin_state_v2", "lockin_state_v1", "fit_app_state_v6", "fit_app_state_v5"];
 const LEGACY_BACKUPS = ["lockin_backups_v2", "lockin_backups_v1", "fit_app_backups_v6", "fit_app_backups_v5"];
 const SESSION_UNLOCK_KEY = "lockin_unlocked";
@@ -208,6 +209,49 @@ function parseJson(raw, fallback) {
   }
 }
 
+function safeLocalGet(key) {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function safeLocalSet(key, value) {
+  try {
+    window.localStorage.setItem(key, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function safeSessionGet(key) {
+  try {
+    return window.sessionStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function safeSessionSet(key, value) {
+  try {
+    window.sessionStorage.setItem(key, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function safeSessionRemove(key) {
+  try {
+    window.sessionStorage.removeItem(key);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function makeId(prefix) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -301,6 +345,25 @@ function normalizeTrainingLogs(candidate) {
   return nested;
 }
 
+function makeDraftSessionKey(dayId, date) {
+  return `${dayId}__${date}`;
+}
+
+function normalizeDraftLogs(candidate) {
+  if (!candidate || typeof candidate !== "object") return {};
+  const normalized = {};
+
+  Object.entries(candidate).forEach(([sessionKey, byExercise]) => {
+    if (!byExercise || typeof byExercise !== "object" || Array.isArray(byExercise)) return;
+    normalized[sessionKey] = {};
+    Object.entries(byExercise).forEach(([exerciseId, sets]) => {
+      normalized[sessionKey][exerciseId] = Array.isArray(sets) ? sets.map(normalizeSet) : [];
+    });
+  });
+
+  return normalized;
+}
+
 function normalizeState(candidate) {
   const routine = Array.isArray(candidate?.routine) && candidate.routine.length ? candidate.routine : DEFAULT_ROUTINE;
   const dietMeals = Array.isArray(candidate?.dietMeals) && candidate.dietMeals.length ? candidate.dietMeals : DEFAULT_DIET_MEALS;
@@ -371,7 +434,7 @@ function normalizeState(candidate) {
 function loadState() {
   const readKeys = [SAVE_KEY, ...LEGACY_KEYS];
   for (const key of readKeys) {
-    const raw = window.localStorage.getItem(key);
+    const raw = safeLocalGet(key);
     if (!raw) continue;
     const parsed = parseJson(raw, null);
     if (parsed && typeof parsed === "object") return normalizeState(parsed);
@@ -379,7 +442,7 @@ function loadState() {
 
   const backupKeys = [BACKUP_KEY, ...LEGACY_BACKUPS];
   for (const key of backupKeys) {
-    const backups = parseJson(window.localStorage.getItem(key), []);
+    const backups = parseJson(safeLocalGet(key), []);
     if (!Array.isArray(backups)) continue;
     for (let idx = backups.length - 1; idx >= 0; idx -= 1) {
       const snapshot = backups[idx]?.snapshot;
@@ -390,17 +453,24 @@ function loadState() {
   return normalizeState(DEFAULT_STATE);
 }
 
+function loadDrafts() {
+  const parsed = parseJson(safeLocalGet(DRAFT_KEY), {});
+  return normalizeDraftLogs(parsed);
+}
+
+function saveDrafts(drafts) {
+  return safeLocalSet(DRAFT_KEY, JSON.stringify(drafts));
+}
+
 function saveState(state, forceBackup = false) {
   const now = Date.now();
   const payload = { ...state, version: 3, updatedAt: new Date(now).toISOString() };
 
-  try {
-    window.localStorage.setItem(SAVE_KEY, JSON.stringify(payload));
-  } catch {
+  if (!safeLocalSet(SAVE_KEY, JSON.stringify(payload))) {
     return { ok: false, error: "No se pudo guardar en localStorage.", backupCount: 0, lastSavedAt: null, lastBackupAt: null };
   }
 
-  const backups = parseJson(window.localStorage.getItem(BACKUP_KEY), []);
+  const backups = parseJson(safeLocalGet(BACKUP_KEY), []);
   const lastBackupAt = Number(backups[backups.length - 1]?.ts || 0);
   const shouldBackup = forceBackup || !lastBackupAt || now - lastBackupAt > AUTO_BACKUP_MS;
   let nextBackups = backups;
@@ -408,9 +478,7 @@ function saveState(state, forceBackup = false) {
   if (shouldBackup) {
     nextBackups = [...backups, { ts: now, snapshot: payload }];
     if (nextBackups.length > MAX_BACKUPS) nextBackups = nextBackups.slice(-MAX_BACKUPS);
-    try {
-      window.localStorage.setItem(BACKUP_KEY, JSON.stringify(nextBackups));
-    } catch {
+    if (!safeLocalSet(BACKUP_KEY, JSON.stringify(nextBackups))) {
       // keep main save
     }
   }
@@ -522,26 +590,16 @@ function Field({ label, value, onChange, type = "text", step, placeholder }) {
   );
 }
 
-function ExerciseLogCard({ dayId, exercise, sessionDate, trainingLogs, onAddSet, onRemoveSet }) {
+function ExerciseLogCard({ exercise, previous, currentSets, onAddSet, onRemoveSet }) {
   const [weight, setWeight] = useState("");
   const [reps, setReps] = useState("");
-
-  const currentSets = trainingLogs?.[dayId]?.[sessionDate]?.[exercise.id] || [];
-  const history = useMemo(() => getExerciseHistory(trainingLogs, dayId, exercise.id), [trainingLogs, dayId, exercise.id]);
-
-  const previous = useMemo(() => {
-    const strictPrevious = history.find((entry) => entry.date < sessionDate);
-    if (strictPrevious) return strictPrevious;
-    const differentDate = history.find((entry) => entry.date !== sessionDate);
-    return differentDate || null;
-  }, [history, sessionDate]);
 
   const addSet = () => {
     const parsedWeight = Number(weight);
     const parsedReps = Number(reps);
     if (Number.isNaN(parsedWeight) || parsedWeight <= 0) return;
     if (Number.isNaN(parsedReps) || parsedReps <= 0) return;
-    onAddSet(dayId, sessionDate, exercise.id, { weight: parsedWeight, reps: parsedReps, ts: Date.now() });
+    onAddSet(exercise.id, { weight: parsedWeight, reps: parsedReps, ts: Date.now() });
     setWeight("");
     setReps("");
   };
@@ -567,7 +625,7 @@ function ExerciseLogCard({ dayId, exercise, sessionDate, trainingLogs, onAddSet,
               key={`${exercise.id}_${index}_${entry.ts}`}
               type="button"
               className="set-chip"
-              onClick={() => onRemoveSet(dayId, sessionDate, exercise.id, index)}
+              onClick={() => onRemoveSet(exercise.id, index)}
               title="Tap para borrar"
             >
               S{index + 1}: {entry.weight}kg x {entry.reps}
@@ -587,13 +645,16 @@ function ExerciseLogCard({ dayId, exercise, sessionDate, trainingLogs, onAddSet,
 
 export default function App() {
   const [state, setState] = useState(() => loadState());
+  const [draftLogs, setDraftLogs] = useState(() => loadDrafts());
   const [saveMeta, setSaveMeta] = useState({ ok: true, error: null, backupCount: 0, lastSavedAt: null, lastBackupAt: null });
   const [tab, setTab] = useState("rutina");
   const [routineEditMode, setRoutineEditMode] = useState(false);
+  const [activeExerciseCard, setActiveExerciseCard] = useState(0);
+  const [routineSavedMessage, setRoutineSavedMessage] = useState("");
   const [dietEditMode, setDietEditMode] = useState(false);
   const [supplementEditMode, setSupplementEditMode] = useState(false);
   const [weightForm, setWeightForm] = useState({ date: new Date().toISOString().slice(0, 10), weight: "", waist: "" });
-  const [isUnlocked, setIsUnlocked] = useState(() => window.sessionStorage.getItem(SESSION_UNLOCK_KEY) === "1");
+  const [isUnlocked, setIsUnlocked] = useState(() => safeSessionGet(SESSION_UNLOCK_KEY) === "1");
 
   useEffect(() => {
     if (navigator.storage?.persist) {
@@ -607,17 +668,40 @@ export default function App() {
     setSaveMeta(saveState(state));
   }, [state]);
 
+  useEffect(() => {
+    saveDrafts(draftLogs);
+  }, [draftLogs]);
+
   const unlock = () => {
-    window.sessionStorage.setItem(SESSION_UNLOCK_KEY, "1");
+    safeSessionSet(SESSION_UNLOCK_KEY, "1");
     setIsUnlocked(true);
   };
 
   const lock = () => {
-    window.sessionStorage.removeItem(SESSION_UNLOCK_KEY);
+    safeSessionRemove(SESSION_UNLOCK_KEY);
     setIsUnlocked(false);
   };
 
   const selectedDay = state.routine[state.dayIndex] || state.routine[0];
+  const sessionDraftKey = makeDraftSessionKey(selectedDay.id, state.sessionDate);
+  const sessionSavedLogs = state.trainingLogs?.[selectedDay.id]?.[state.sessionDate] || {};
+  const totalRoutineCards = selectedDay.exercises.length + 1;
+
+  const sessionDraft = useMemo(() => {
+    const existing = draftLogs?.[sessionDraftKey];
+    if (existing && typeof existing === "object") return existing;
+    const fromSaved = {};
+    selectedDay.exercises.forEach((exercise) => {
+      const sets = Array.isArray(sessionSavedLogs?.[exercise.id]) ? sessionSavedLogs[exercise.id].map(normalizeSet) : [];
+      if (sets.length > 0) fromSaved[exercise.id] = sets;
+    });
+    return fromSaved;
+  }, [draftLogs, selectedDay.exercises, sessionDraftKey, sessionSavedLogs]);
+
+  const sessionSetCount = useMemo(
+    () => selectedDay.exercises.reduce((acc, exercise) => acc + (Array.isArray(sessionDraft?.[exercise.id]) ? sessionDraft[exercise.id].length : 0), 0),
+    [selectedDay.exercises, sessionDraft]
+  );
 
   const sortedWeightLogs = useMemo(
     () => [...state.weightLogs].sort((a, b) => b.date.localeCompare(a.date)),
@@ -659,33 +743,102 @@ export default function App() {
     setState((prev) => ({ ...prev, sessionDate: date }));
   };
 
-  const addSetLog = (dayId, date, exerciseId, payload) => {
-    setState((prev) => {
-      const dayLogs = { ...(prev.trainingLogs[dayId] || {}) };
-      const dateLogs = { ...(dayLogs[date] || {}) };
-      const sets = [...(dateLogs[exerciseId] || []), payload];
-      dateLogs[exerciseId] = sets;
-      dayLogs[date] = dateLogs;
-      return {
-        ...prev,
-        trainingLogs: { ...prev.trainingLogs, [dayId]: dayLogs },
-      };
+  useEffect(() => {
+    setActiveExerciseCard(0);
+    setRoutineSavedMessage("");
+  }, [selectedDay.id, selectedDay.exercises.length, state.sessionDate]);
+
+  const buildBaseDraft = () => {
+    const base = {};
+    selectedDay.exercises.forEach((exercise) => {
+      const sets = Array.isArray(sessionSavedLogs?.[exercise.id]) ? sessionSavedLogs[exercise.id].map(normalizeSet) : [];
+      if (sets.length > 0) base[exercise.id] = sets;
+    });
+    return base;
+  };
+
+  const updateSessionDraft = (updater) => {
+    setDraftLogs((prev) => {
+      const current = prev?.[sessionDraftKey];
+      const currentDraft =
+        current && typeof current === "object"
+          ? Object.fromEntries(
+              Object.entries(current).map(([exerciseId, sets]) => [
+                exerciseId,
+                Array.isArray(sets) ? sets.map(normalizeSet) : [],
+              ])
+            )
+          : buildBaseDraft();
+      const nextDraft = updater(currentDraft);
+      return { ...prev, [sessionDraftKey]: nextDraft };
     });
   };
 
-  const removeSetLog = (dayId, date, exerciseId, index) => {
-    setState((prev) => {
-      const dayLogs = { ...(prev.trainingLogs[dayId] || {}) };
-      const dateLogs = { ...(dayLogs[date] || {}) };
-      const sets = [...(dateLogs[exerciseId] || [])];
+  const addSetDraft = (exerciseId, payload) => {
+    updateSessionDraft((currentDraft) => {
+      const currentSets = Array.isArray(currentDraft?.[exerciseId]) ? currentDraft[exerciseId] : [];
+      return { ...currentDraft, [exerciseId]: [...currentSets, payload] };
+    });
+    if (routineSavedMessage) setRoutineSavedMessage("");
+  };
+
+  const removeSetDraft = (exerciseId, index) => {
+    updateSessionDraft((currentDraft) => {
+      const sets = [...(Array.isArray(currentDraft?.[exerciseId]) ? currentDraft[exerciseId] : [])];
       sets.splice(index, 1);
-      dateLogs[exerciseId] = sets;
-      dayLogs[date] = dateLogs;
+      if (sets.length > 0) return { ...currentDraft, [exerciseId]: sets };
+      const nextDraft = { ...currentDraft };
+      delete nextDraft[exerciseId];
+      return nextDraft;
+    });
+  };
+
+  const clearSessionDraft = () => {
+    setDraftLogs((prev) => {
+      if (!prev?.[sessionDraftKey]) return prev;
+      const next = { ...prev };
+      delete next[sessionDraftKey];
+      return next;
+    });
+  };
+
+  const finalizeRoutine = () => {
+    const hasSets = selectedDay.exercises.some((exercise) => Array.isArray(sessionDraft?.[exercise.id]) && sessionDraft[exercise.id].length > 0);
+    if (!hasSets && !window.confirm("No hay sets capturados. Guardar esta rutina vacia para la fecha seleccionada?")) return;
+
+    setState((prev) => {
+      const dayLogs = { ...(prev.trainingLogs[selectedDay.id] || {}) };
+      const dateLogs = { ...(dayLogs[state.sessionDate] || {}) };
+
+      selectedDay.exercises.forEach((exercise) => {
+        const sets = Array.isArray(sessionDraft?.[exercise.id]) ? sessionDraft[exercise.id].map(normalizeSet) : [];
+        if (sets.length > 0) dateLogs[exercise.id] = sets;
+        else delete dateLogs[exercise.id];
+      });
+
+      if (Object.keys(dateLogs).length > 0) dayLogs[state.sessionDate] = dateLogs;
+      else delete dayLogs[state.sessionDate];
+
+      const nextTrainingLogs = { ...prev.trainingLogs };
+      if (Object.keys(dayLogs).length > 0) nextTrainingLogs[selectedDay.id] = dayLogs;
+      else delete nextTrainingLogs[selectedDay.id];
+
       return {
         ...prev,
-        trainingLogs: { ...prev.trainingLogs, [dayId]: dayLogs },
+        trainingLogs: nextTrainingLogs,
       };
     });
+
+    clearSessionDraft();
+    setRoutineSavedMessage(`Rutina guardada: ${selectedDay.fullDay} ${state.sessionDate}`);
+    setActiveExerciseCard(selectedDay.exercises.length);
+  };
+
+  const onRoutineTrackScroll = (event) => {
+    const { scrollLeft, clientWidth } = event.currentTarget;
+    if (!clientWidth) return;
+    const index = clamp(Math.round(scrollLeft / clientWidth), 0, totalRoutineCards - 1);
+    if (index !== activeExerciseCard) setActiveExerciseCard(index);
   };
 
   const addWeightLog = () => {
@@ -939,7 +1092,12 @@ export default function App() {
           <div className="day-chip-row">
             {state.routine.map((day, index) => {
               const dateLogs = state.trainingLogs?.[day.id]?.[state.sessionDate] || {};
-              const hasLogs = day.exercises.some((exercise) => Array.isArray(dateLogs?.[exercise.id]) && dateLogs[exercise.id].length > 0);
+              const dayDraft = draftLogs?.[makeDraftSessionKey(day.id, state.sessionDate)] || {};
+              const hasLogs = day.exercises.some((exercise) => {
+                const hasSaved = Array.isArray(dateLogs?.[exercise.id]) && dateLogs[exercise.id].length > 0;
+                const hasDraft = Array.isArray(dayDraft?.[exercise.id]) && dayDraft[exercise.id].length > 0;
+                return hasSaved || hasDraft;
+              });
               return (
                 <button key={day.id} type="button" className={`day-chip ${index === state.dayIndex ? "active" : ""}`} onClick={() => selectDay(index)}>
                   {day.shortDay}
@@ -964,18 +1122,46 @@ export default function App() {
           </div>
 
           {!routineEditMode && selectedDay.exercises.length > 0 && (
-            <div className="stack gap-10 top-10">
-              {selectedDay.exercises.map((exercise) => (
-                <ExerciseLogCard
-                  key={exercise.id}
-                  dayId={selectedDay.id}
-                  exercise={exercise}
-                  sessionDate={state.sessionDate}
-                  trainingLogs={state.trainingLogs}
-                  onAddSet={addSetLog}
-                  onRemoveSet={removeSetLog}
-                />
-              ))}
+            <div className="top-10">
+              <p className="muted small">Desliza horizontalmente para capturar cada ejercicio. La ultima card finaliza y guarda todo.</p>
+              {routineSavedMessage && <p className="trend top-6">{routineSavedMessage}</p>}
+
+              <div className="swipe-progress top-8">
+                {Array.from({ length: totalRoutineCards }).map((_, index) => (
+                  <span key={`dot_${index}`} className={`swipe-dot ${index === activeExerciseCard ? "active" : ""}`} />
+                ))}
+              </div>
+
+              <div key={`swipe_${selectedDay.id}_${state.sessionDate}`} className="swipe-track top-8" onScroll={onRoutineTrackScroll}>
+                {selectedDay.exercises.map((exercise) => {
+                  const history = getExerciseHistory(state.trainingLogs, selectedDay.id, exercise.id);
+                  const previous = history.find((entry) => entry.date < state.sessionDate) || history.find((entry) => entry.date !== state.sessionDate) || null;
+                  const currentSets = Array.isArray(sessionDraft?.[exercise.id]) ? sessionDraft[exercise.id] : [];
+
+                  return (
+                    <div key={exercise.id} className="swipe-slide">
+                      <ExerciseLogCard
+                        exercise={exercise}
+                        previous={previous}
+                        currentSets={currentSets}
+                        onAddSet={addSetDraft}
+                        onRemoveSet={removeSetDraft}
+                      />
+                    </div>
+                  );
+                })}
+
+                <div className="swipe-slide">
+                  <article className="exercise-card">
+                    <h4>Finalizar rutina</h4>
+                    <p className="muted top-6">{selectedDay.fullDay} · {selectedDay.title}</p>
+                    <p className="muted top-6">Fecha: {state.sessionDate}</p>
+                    <p className="muted top-6">Sets listos para guardar: {sessionSetCount}</p>
+                    <button className="btn btn-primary top-10" type="button" onClick={finalizeRoutine}>Finalizar y guardar</button>
+                    <p className="tiny-note">Borrador autosalvado en este iPhone mientras capturas. No se pierde si cierras Safari.</p>
+                  </article>
+                </div>
+              </div>
             </div>
           )}
 

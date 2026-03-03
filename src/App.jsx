@@ -1,4 +1,5 @@
-﻿import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createClient } from "@supabase/supabase-js";
 
 const SAVE_KEY = "lockin_state_v3";
 const BACKUP_KEY = "lockin_backups_v3";
@@ -10,6 +11,18 @@ const ACCESS_KEY = (import.meta.env.VITE_APP_ACCESS_KEY || "fitapp-2026").trim()
 const USING_FALLBACK_KEY = !import.meta.env.VITE_APP_ACCESS_KEY;
 const AUTO_BACKUP_MS = 1000 * 60 * 60 * 6;
 const MAX_BACKUPS = 40;
+const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL || "").trim();
+const SUPABASE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY || "").trim();
+const SUPABASE_PROFILE_KEY = (import.meta.env.VITE_SUPABASE_PROFILE_KEY || "sebastian-main").trim();
+const CLOUD_TABLE = "lockin_state";
+const CLOUD_SYNC_DEBOUNCE_MS = 1500;
+
+const CLOUD_ENABLED = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY && SUPABASE_PROFILE_KEY);
+const supabase = CLOUD_ENABLED
+  ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    })
+  : null;
 
 const DEFAULT_SETTINGS = {
   appName: "LOCK IN",
@@ -492,6 +505,46 @@ function saveState(state, forceBackup = false) {
   };
 }
 
+async function fetchCloudState() {
+  if (!CLOUD_ENABLED || !supabase) return { ok: false, reason: "disabled", payload: null, cloudUpdatedAt: null };
+
+  const { data, error } = await supabase
+    .from(CLOUD_TABLE)
+    .select("payload,updated_at")
+    .eq("profile_key", SUPABASE_PROFILE_KEY)
+    .maybeSingle();
+
+  if (error) return { ok: false, reason: error.message, payload: null, cloudUpdatedAt: null };
+  if (!data?.payload || typeof data.payload !== "object") return { ok: true, reason: null, payload: null, cloudUpdatedAt: data?.updated_at || null };
+
+  return {
+    ok: true,
+    reason: null,
+    payload: normalizeState(data.payload),
+    cloudUpdatedAt: data?.updated_at || null,
+  };
+}
+
+async function pushCloudState(payload) {
+  if (!CLOUD_ENABLED || !supabase) return { ok: false, reason: "disabled", cloudUpdatedAt: null };
+
+  const { data, error } = await supabase
+    .from(CLOUD_TABLE)
+    .upsert(
+      {
+        profile_key: SUPABASE_PROFILE_KEY,
+        payload,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "profile_key" }
+    )
+    .select("updated_at")
+    .single();
+
+  if (error) return { ok: false, reason: error.message, cloudUpdatedAt: null };
+  return { ok: true, reason: null, cloudUpdatedAt: data?.updated_at || null };
+}
+
 function formatDate(input) {
   if (!input) return "--";
   const date = new Date(input);
@@ -610,11 +663,11 @@ function ExerciseLogCard({ exercise, previous, currentSets, onAddSet, onRemoveSe
         <h4>{exercise.name}</h4>
         <span className="pill">{exercise.sets} x {exercise.reps}</span>
       </div>
-      <p className="exercise-meta">Descanso: {exercise.rest} · {exercise.note || "sin nota"}</p>
+      <p className="exercise-meta">Descanso: {exercise.rest} Â· {exercise.note || "sin nota"}</p>
 
       {previous && (
         <p className="trend">
-          Ultima vez ({previous.date}): {previous.last.weight}kg x {previous.last.reps} · max {previous.max}kg
+          Ultima vez ({previous.date}): {previous.last.weight}kg x {previous.last.reps} Â· max {previous.max}kg
         </p>
       )}
 
@@ -1051,10 +1104,10 @@ export default function App() {
     <div className="app-shell">
       <header className="hero">
         <div>
-          <p className="hero-tag">LOCK IN · PRIVATE MODE</p>
+          <p className="hero-tag">LOCK IN Â· PRIVATE MODE</p>
           <h1>{state.settings.appName}</h1>
           <p className="hero-sub">
-            {state.settings.profileName} · {latestWeight.toFixed(1)}kg actual · Meta {state.settings.goalWeight}kg
+            {state.settings.profileName} Â· {latestWeight.toFixed(1)}kg actual Â· Meta {state.settings.goalWeight}kg
           </p>
         </div>
         <button className="btn btn-ghost" type="button" onClick={lock}>Bloquear</button>
@@ -1108,7 +1161,7 @@ export default function App() {
           </div>
 
           <article className="focus-card">
-            <p className="focus-kicker">{selectedDay.fullDay} · {selectedDay.type}</p>
+            <p className="focus-kicker">{selectedDay.fullDay} Â· {selectedDay.type}</p>
             <h3>{selectedDay.title}</h3>
             <p className="muted">{selectedDay.postCardio || ""}</p>
             {selectedDay.cardioProtocol && <p className="muted top-6">{selectedDay.cardioProtocol}</p>}
@@ -1154,7 +1207,7 @@ export default function App() {
                 <div className="swipe-slide">
                   <article className="exercise-card">
                     <h4>Finalizar rutina</h4>
-                    <p className="muted top-6">{selectedDay.fullDay} · {selectedDay.title}</p>
+                    <p className="muted top-6">{selectedDay.fullDay} Â· {selectedDay.title}</p>
                     <p className="muted top-6">Fecha: {state.sessionDate}</p>
                     <p className="muted top-6">Sets listos para guardar: {sessionSetCount}</p>
                     <button className="btn btn-primary top-10" type="button" onClick={finalizeRoutine}>Finalizar y guardar</button>
@@ -1236,7 +1289,7 @@ export default function App() {
                 <div key={entry.id} className="log-row">
                   <div>
                     <strong>{entry.weight}kg</strong>
-                    <p className="muted small">{entry.date}{entry.waist !== null ? ` · cintura ${entry.waist}cm` : ""}</p>
+                    <p className="muted small">{entry.date}{entry.waist !== null ? ` Â· cintura ${entry.waist}cm` : ""}</p>
                   </div>
                   <button className="btn btn-danger" type="button" onClick={() => removeWeightLog(entry.id)}>Borrar</button>
                 </div>
@@ -1256,7 +1309,7 @@ export default function App() {
 
                 return (
                   <div key={day.id} className="exercise-editor">
-                    <h5>{day.fullDay} · {day.title}</h5>
+                    <h5>{day.fullDay} Â· {day.title}</h5>
                     <div className="stack gap-8 top-8">
                       {exercisesWithHistory.map(({ exercise, history }) => (
                         <div key={exercise.id} className="dish-card">
@@ -1264,7 +1317,7 @@ export default function App() {
                           <div className="stack gap-8 top-6">
                             {history.map((entry) => (
                               <p key={`${exercise.id}_${entry.date}`} className="muted small">
-                                {entry.date}: max {entry.max}kg · promedio {entry.avg?.toFixed(1)}kg · sets {entry.sets.length}
+                                {entry.date}: max {entry.max}kg Â· promedio {entry.avg?.toFixed(1)}kg Â· sets {entry.sets.length}
                               </p>
                             ))}
                           </div>
@@ -1340,7 +1393,7 @@ export default function App() {
                       ) : (
                         <>
                           <h5>{option.name}</h5>
-                          <p className="muted small">{option.kcal} kcal · P {option.protein}g · C {option.carbs}g · G {option.fats}g</p>
+                          <p className="muted small">{option.kcal} kcal Â· P {option.protein}g Â· C {option.carbs}g Â· G {option.fats}g</p>
                           <p className="muted top-6">{option.description}</p>
                         </>
                       )}
@@ -1396,7 +1449,7 @@ export default function App() {
                       <h4>{item.name}</h4>
                       <span className="pill">{item.status}</span>
                     </div>
-                    <p className="muted top-6">{item.dose} · {item.timing}</p>
+                    <p className="muted top-6">{item.dose} Â· {item.timing}</p>
                     <p className="muted top-6">{item.note}</p>
                   </>
                 )}

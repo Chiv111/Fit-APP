@@ -1,14 +1,14 @@
 ﻿import { useEffect, useMemo, useState } from "react";
 
-const SAVE_KEY = "lockin_state_v2";
-const BACKUP_KEY = "lockin_backups_v2";
-const LEGACY_KEYS = ["lockin_state_v1", "fit_app_state_v6", "fit_app_state_v5"];
-const LEGACY_BACKUPS = ["lockin_backups_v1", "fit_app_backups_v6", "fit_app_backups_v5"];
+const SAVE_KEY = "lockin_state_v3";
+const BACKUP_KEY = "lockin_backups_v3";
+const LEGACY_KEYS = ["lockin_state_v2", "lockin_state_v1", "fit_app_state_v6", "fit_app_state_v5"];
+const LEGACY_BACKUPS = ["lockin_backups_v2", "lockin_backups_v1", "fit_app_backups_v6", "fit_app_backups_v5"];
 const SESSION_UNLOCK_KEY = "lockin_unlocked";
 const ACCESS_KEY = (import.meta.env.VITE_APP_ACCESS_KEY || "fitapp-2026").trim();
 const USING_FALLBACK_KEY = !import.meta.env.VITE_APP_ACCESS_KEY;
 const AUTO_BACKUP_MS = 1000 * 60 * 60 * 6;
-const MAX_BACKUPS = 30;
+const MAX_BACKUPS = 40;
 
 const DEFAULT_SETTINGS = {
   appName: "LOCK IN",
@@ -22,7 +22,7 @@ const DEFAULT_SETTINGS = {
   carbs: 250,
   fats: 75,
   weeklyCardioMin: 180,
-  focusNote: "Consistencia diaria. Progresion semanal. Nada de medias reps.",
+  focusNote: "Consistencia diaria. Progresion semanal.",
 };
 
 const DEFAULT_ROUTINE = [
@@ -42,8 +42,8 @@ const DEFAULT_ROUTINE = [
       { id: "lun5", name: "Flys de pecho maquina", sets: "3", reps: "8-10", rest: "0s", note: "Biserie B, RIR 1" },
       { id: "lun6", name: "Lat pulldown convencional", sets: "3", reps: "8-10", rest: "90s-2 min", note: "Biserie B, RIR 1" },
       { id: "lun7", name: "Pulldown con triangulo", sets: "3", reps: "10-12", rest: "0s", note: "Biserie C, RIR 1" },
-      { id: "lun8", name: "Press around fibras inferiores", sets: "3", reps: "10-12", rest: "90s-2 min", note: "Biserie C, RIR 1" }
-    ]
+      { id: "lun8", name: "Press around fibras inferiores", sets: "3", reps: "10-12", rest: "90s-2 min", note: "Biserie C, RIR 1" },
+    ],
   },
   {
     id: "d_mar",
@@ -58,8 +58,8 @@ const DEFAULT_ROUTINE = [
       { id: "mar2", name: "Pull-ups", sets: "5", reps: "5", rest: "2-3 min", note: "Progresion 5x5, RIR 3-4" },
       { id: "mar3", name: "Press militar", sets: "5", reps: "5", rest: "2-3 min", note: "Progresion 5x5, RIR 3-4" },
       { id: "mar4", name: "Remo espalda alta cable", sets: "3", reps: "6-8", rest: "0s", note: "Biserie B, RIR 1-2" },
-      { id: "mar5", name: "Elevaciones laterales", sets: "3", reps: "6-8", rest: "90s-2 min", note: "Biserie B, RIR 2" }
-    ]
+      { id: "mar5", name: "Elevaciones laterales", sets: "3", reps: "6-8", rest: "90s-2 min", note: "Biserie B, RIR 2" },
+    ],
   },
   {
     id: "d_mie",
@@ -75,8 +75,8 @@ const DEFAULT_ROUTINE = [
       { id: "mie3", name: "Extensiones pierna isometrica", sets: "3", reps: "6-8", rest: "2-3 min", note: "RIR 1-2" },
       { id: "mie4", name: "Puente gluteo medio", sets: "2", reps: "8-10", rest: "2-3 min", note: "RIR 1" },
       { id: "mie5", name: "Peso muerto unilateral landmine", sets: "2", reps: "8-10", rest: "2-3 min", note: "RIR 1" },
-      { id: "mie6", name: "Elevaciones pantorrilla", sets: "3", reps: "8-10", rest: "2-3 min", note: "RIR 1" }
-    ]
+      { id: "mie6", name: "Elevaciones pantorrilla", sets: "3", reps: "8-10", rest: "2-3 min", note: "RIR 1" },
+    ],
   },
   {
     id: "d_jue",
@@ -85,8 +85,9 @@ const DEFAULT_ROUTINE = [
     type: "Cardio Intenso",
     title: "Intervalos en Colina",
     postCardio: "No agregar cardio extra",
-    cardioProtocol: "Calentamiento 8 min. 6 rondas: 30s sprint 80% + recuperar hasta 130 LPM. Sin colina: cinta 10-15%. Enfriamiento 5 min.",
-    exercises: []
+    cardioProtocol:
+      "Calentamiento 8 min. 6 rondas: 30s sprint 80% + recuperar hasta 130 LPM. Sin colina: cinta 10-15%. Enfriamiento 5 min.",
+    exercises: [],
   },
   {
     id: "d_vie",
@@ -102,8 +103,8 @@ const DEFAULT_ROUTINE = [
       { id: "vie3", name: "Sentadilla bulgara", sets: "2-3", reps: "6-8", rest: "90s-2 min", note: "RIR 1-2" },
       { id: "vie4", name: "Maquina de aductores", sets: "3", reps: "30 segundos", rest: "90s-2 min", note: "RIR 1" },
       { id: "vie5", name: "Curl piernas acostado unilateral", sets: "2-3", reps: "8-10", rest: "90s-2 min", note: "RIR 1" },
-      { id: "vie6", name: "Crunch banca con disco", sets: "2", reps: "8-10", rest: "90s-2 min", note: "RIR 1" }
-    ]
+      { id: "vie6", name: "Crunch banca con disco", sets: "2", reps: "8-10", rest: "90s-2 min", note: "RIR 1" },
+    ],
   },
   {
     id: "d_sab",
@@ -121,8 +122,8 @@ const DEFAULT_ROUTINE = [
       { id: "sab5", name: "Curl apoyo en espalda", sets: "3", reps: "8-12", rest: "90s-2 min", note: "Biserie biceps" },
       { id: "sab6", name: "Flexion de muneca", sets: "3", reps: "10-15 + hold 10s", rest: "-", note: "Antebrazo" },
       { id: "sab7", name: "Extension de muneca", sets: "3", reps: "10-15 + hold 10s", rest: "-", note: "Antebrazo" },
-      { id: "sab8", name: "Dead hang", sets: "3", reps: "max hold", rest: "-", note: "RIR 0-1" }
-    ]
+      { id: "sab8", name: "Dead hang", sets: "3", reps: "max hold", rest: "-", note: "RIR 0-1" },
+    ],
   },
   {
     id: "d_dom",
@@ -132,8 +133,8 @@ const DEFAULT_ROUTINE = [
     title: "Carrera libre 30-35 min",
     postCardio: "Dia de cardio",
     cardioProtocol: "Ritmo 5:00-5:30 min/km. FC 130-150 LPM. RPE 4-5. Si no puedes hablar, baja ritmo.",
-    exercises: []
-  }
+    exercises: [],
+  },
 ];
 
 const DEFAULT_DIET_MEALS = [
@@ -144,18 +145,16 @@ const DEFAULT_DIET_MEALS = [
     note: "Proteina alta + carbos para energia.",
     options: [
       { id: "des_a", name: "Opcion A - Clasica", kcal: 844, protein: 49, carbs: 79, fats: 39, description: "Huevos + claras + aceite + avena + tortillas + verduras + cafe con leche." },
-      { id: "des_b", name: "Opcion B - Licuado + huevos", kcal: 823, protein: 46, carbs: 80, fats: 35, description: "Leche + avena + platano + crema cacahuate + huevos cocidos." },
-      { id: "des_c", name: "Opcion C - Chilaquiles proteicos", kcal: 857, protein: 64, carbs: 59, fats: 25, description: "Pollo + tortillas al horno + 2 huevos + salsa + queso." }
-    ]
+      { id: "des_b", name: "Opcion B - Licuado + huevos", kcal: 790, protein: 42, carbs: 80, fats: 35, description: "Leche + avena + platano + crema cacahuate + huevos cocidos." },
+      { id: "des_c", name: "Opcion C - Chilaquiles proteicos", kcal: 733, protein: 68, carbs: 59, fats: 25, description: "Pollo + tortillas al horno + 2 huevos + salsa + queso." },
+    ],
   },
   {
     id: "m_pre",
     title: "Pre-entreno",
     time: "3:30-4:00pm",
     note: "Energia para entrenar.",
-    options: [
-      { id: "pre_a", name: "Platano + requeson", kcal: 263, protein: 23, carbs: 32, fats: 5, description: "1 platano + 150g requeson." }
-    ]
+    options: [{ id: "pre_a", name: "Platano + requeson", kcal: 263, protein: 23, carbs: 32, fats: 5, description: "1 platano + 150g requeson." }],
   },
   {
     id: "m_cena",
@@ -165,28 +164,39 @@ const DEFAULT_DIET_MEALS = [
     options: [
       { id: "cen_a", name: "Pechuga + arroz", kcal: 1219, protein: 107, carbs: 108, fats: 38, description: "400g pollo + 300g arroz + verduras + aceite + medio aguacate." },
       { id: "cen_b", name: "Arrachera + tortillas", kcal: 1340, protein: 95, carbs: 85, fats: 72, description: "300g arrachera + 2 huevos + 5 tortillas + verduras + aceite." },
-      { id: "cen_c", name: "Lomo cerdo + tortillas", kcal: 1177, protein: 102, carbs: 73, fats: 55, description: "350g lomo + 2 huevos + 4 tortillas + verduras + aceite." }
-    ]
+      { id: "cen_c", name: "Lomo cerdo + tortillas", kcal: 1177, protein: 102, carbs: 73, fats: 55, description: "350g lomo + 2 huevos + 4 tortillas + verduras + aceite." },
+    ],
   },
   {
     id: "m_snack",
     title: "Snack anti-estres",
     time: "Despues de 8:00pm si hace falta",
     note: "Solo si sigue el hambre despues de agua + 10 min.",
-    options: [
-      { id: "snk_a", name: "Requeson + vegetales", kcal: 130, protein: 16, carbs: 9, fats: 3, description: "100g requeson/jocoque + pepino o zanahoria." }
-    ]
-  }
+    options: [{ id: "snk_a", name: "Requeson + vegetales", kcal: 130, protein: 16, carbs: 9, fats: 3, description: "100g requeson/jocoque + pepino o zanahoria." }],
+  },
+];
+
+const DEFAULT_SUPPLEMENTS = [
+  { id: "sup_creatina", status: "Actual", name: "Creatina monohidratada", dose: "5g", timing: "Diario", note: "Mantener sin ciclar." },
+  { id: "sup_magnesio", status: "Actual", name: "Magnesio", dose: "dosis actual", timing: "Noche", note: "Recuperacion y descanso." },
+  { id: "sup_zinc", status: "Actual", name: "Zinc", dose: "dosis actual", timing: "Noche", note: "Soporte hormonal." },
+  { id: "sup_b", status: "Actual", name: "Complejo B", dose: "dosis actual", timing: "Manana", note: "Metabolismo energetico." },
+  { id: "sup_d3k2", status: "Agregar", name: "Vitamina D3 + K2", dose: "2000-4000 IU + 100mcg", timing: "Con comida con grasa", note: "Prioridad #1." },
+  { id: "sup_omega", status: "Agregar", name: "Omega-3 (EPA+DHA)", dose: "2-3g EPA+DHA", timing: "Con cena", note: "Reduce inflamacion." },
+  { id: "sup_whey", status: "Opcional", name: "Whey protein", dose: "1 scoop", timing: "Solo si faltan proteinas", note: "Completar objetivo diario." },
+  { id: "sup_ash", status: "Opcional", name: "Ashwagandha KSM-66", dose: "300-600mg", timing: "Con cena", note: "Si hay estres alto." },
 ];
 
 const DEFAULT_STATE = {
   week: 1,
   dayIndex: 0,
+  sessionDate: new Date().toISOString().slice(0, 10),
   settings: DEFAULT_SETTINGS,
   routine: DEFAULT_ROUTINE,
   dietMeals: DEFAULT_DIET_MEALS,
+  supplements: DEFAULT_SUPPLEMENTS,
   trainingLogs: {},
-  weightLogs: []
+  weightLogs: [],
 };
 
 function parseJson(raw, fallback) {
@@ -206,36 +216,112 @@ function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
 
-function workoutKey(week, dayId, exerciseId) {
-  return `w${week}_${dayId}_${exerciseId}`;
-}
-
 function averageWeight(sets) {
   if (!sets.length) return null;
   const sum = sets.reduce((acc, item) => acc + (Number(item.weight) || 0), 0);
   return sum / sets.length;
 }
 
+function mondayOfIsoWeek(weekNumber) {
+  const year = new Date().getFullYear();
+  const simple = new Date(Date.UTC(year, 0, 1 + (weekNumber - 1) * 7));
+  const day = simple.getUTCDay();
+  const isoWeekStart = new Date(simple);
+  if (day <= 4) {
+    isoWeekStart.setUTCDate(simple.getUTCDate() - simple.getUTCDay() + 1);
+  } else {
+    isoWeekStart.setUTCDate(simple.getUTCDate() + 8 - simple.getUTCDay());
+  }
+  return isoWeekStart.toISOString().slice(0, 10);
+}
+
+function normalizeSet(candidate) {
+  const weight = Number(candidate?.weight ?? candidate?.w ?? 0);
+  const reps = Number(candidate?.reps ?? candidate?.r ?? 0);
+  return {
+    weight: Number.isNaN(weight) ? 0 : weight,
+    reps: Number.isNaN(reps) ? 0 : reps,
+    ts: candidate?.ts || Date.now(),
+  };
+}
+
+function migrateFlatLogs(flatLogs) {
+  const nested = {};
+
+  Object.entries(flatLogs || {}).forEach(([key, value]) => {
+    if (!Array.isArray(value)) return;
+
+    let dayId = "legacy_day";
+    let date = new Date().toISOString().slice(0, 10);
+    let exerciseId = `legacy_${Math.random().toString(36).slice(2, 6)}`;
+
+    const oldFormat = key.match(/^w(\d+)_(d_[a-z]+)_(.+)$/i);
+    if (oldFormat) {
+      const week = Number(oldFormat[1]);
+      dayId = oldFormat[2];
+      exerciseId = oldFormat[3];
+      date = mondayOfIsoWeek(week || 1);
+    }
+
+    const newFlatFormat = key.match(/^(d_[a-z]+)__(\d{4}-\d{2}-\d{2})__(.+)$/i);
+    if (newFlatFormat) {
+      dayId = newFlatFormat[1];
+      date = newFlatFormat[2];
+      exerciseId = newFlatFormat[3];
+    }
+
+    if (!nested[dayId]) nested[dayId] = {};
+    if (!nested[dayId][date]) nested[dayId][date] = {};
+
+    nested[dayId][date][exerciseId] = value.map(normalizeSet);
+  });
+
+  return nested;
+}
+
+function normalizeTrainingLogs(candidate) {
+  if (!candidate || typeof candidate !== "object") return {};
+
+  const values = Object.values(candidate);
+  if (!values.length) return {};
+
+  const likelyNested = values.every((value) => value && typeof value === "object" && !Array.isArray(value));
+  if (!likelyNested) return migrateFlatLogs(candidate);
+
+  const nested = {};
+  Object.entries(candidate).forEach(([dayId, byDate]) => {
+    nested[dayId] = {};
+    Object.entries(byDate || {}).forEach(([date, byExercise]) => {
+      nested[dayId][date] = {};
+      Object.entries(byExercise || {}).forEach(([exerciseId, sets]) => {
+        nested[dayId][date][exerciseId] = Array.isArray(sets) ? sets.map(normalizeSet) : [];
+      });
+    });
+  });
+  return nested;
+}
+
 function normalizeState(candidate) {
   const routine = Array.isArray(candidate?.routine) && candidate.routine.length ? candidate.routine : DEFAULT_ROUTINE;
   const dietMeals = Array.isArray(candidate?.dietMeals) && candidate.dietMeals.length ? candidate.dietMeals : DEFAULT_DIET_MEALS;
-  const settings = { ...DEFAULT_SETTINGS, ...(candidate?.settings || {}) };
+  const supplements = Array.isArray(candidate?.supplements) && candidate.supplements.length ? candidate.supplements : DEFAULT_SUPPLEMENTS;
 
   return {
     week: Math.max(1, Number(candidate?.week) || 1),
     dayIndex: clamp(Number(candidate?.dayIndex) || 0, 0, routine.length - 1),
-    settings,
-    routine: routine.map((day, index) => ({
-      id: day.id || makeId(`d${index}`),
-      shortDay: day.shortDay || `D${index + 1}`,
-      fullDay: day.fullDay || `Dia ${index + 1}`,
+    sessionDate: typeof candidate?.sessionDate === "string" ? candidate.sessionDate : new Date().toISOString().slice(0, 10),
+    settings: { ...DEFAULT_SETTINGS, ...(candidate?.settings || {}) },
+    routine: routine.map((day, dayIndex) => ({
+      id: day.id || makeId(`day${dayIndex}`),
+      shortDay: day.shortDay || `D${dayIndex + 1}`,
+      fullDay: day.fullDay || `Dia ${dayIndex + 1}`,
       type: day.type || "Fuerza",
       title: day.title || "Sesion",
       postCardio: day.postCardio || "",
       cardioProtocol: day.cardioProtocol || "",
       exercises: Array.isArray(day.exercises)
         ? day.exercises.map((exercise, exIndex) => ({
-            id: exercise.id || makeId(`e${exIndex}`),
+            id: exercise.id || makeId(`ex${exIndex}`),
             name: exercise.name || "Nuevo ejercicio",
             sets: exercise.sets || "3",
             reps: exercise.reps || "8-10",
@@ -244,14 +330,14 @@ function normalizeState(candidate) {
           }))
         : [],
     })),
-    dietMeals: dietMeals.map((meal, index) => ({
-      id: meal.id || makeId(`m${index}`),
-      title: meal.title || `Comida ${index + 1}`,
+    dietMeals: dietMeals.map((meal, mealIndex) => ({
+      id: meal.id || makeId(`meal${mealIndex}`),
+      title: meal.title || `Comida ${mealIndex + 1}`,
       time: meal.time || "",
       note: meal.note || "",
       options: Array.isArray(meal.options)
         ? meal.options.map((option, optIndex) => ({
-            id: option.id || makeId(`o${optIndex}`),
+            id: option.id || makeId(`opt${optIndex}`),
             name: option.name || "Nuevo platillo",
             kcal: Number(option.kcal) || 0,
             protein: Number(option.protein) || 0,
@@ -261,7 +347,15 @@ function normalizeState(candidate) {
           }))
         : [],
     })),
-    trainingLogs: typeof candidate?.trainingLogs === "object" && candidate.trainingLogs ? candidate.trainingLogs : {},
+    supplements: supplements.map((item, idx) => ({
+      id: item.id || makeId(`sup${idx}`),
+      status: item.status || "Actual",
+      name: item.name || "Suplemento",
+      dose: item.dose || "",
+      timing: item.timing || "",
+      note: item.note || "",
+    })),
+    trainingLogs: normalizeTrainingLogs(candidate?.trainingLogs),
     weightLogs: Array.isArray(candidate?.weightLogs)
       ? candidate.weightLogs.map((entry) => ({
           id: entry.id || makeId("w"),
@@ -275,8 +369,8 @@ function normalizeState(candidate) {
 }
 
 function loadState() {
-  const keys = [SAVE_KEY, ...LEGACY_KEYS];
-  for (const key of keys) {
+  const readKeys = [SAVE_KEY, ...LEGACY_KEYS];
+  for (const key of readKeys) {
     const raw = window.localStorage.getItem(key);
     if (!raw) continue;
     const parsed = parseJson(raw, null);
@@ -287,8 +381,8 @@ function loadState() {
   for (const key of backupKeys) {
     const backups = parseJson(window.localStorage.getItem(key), []);
     if (!Array.isArray(backups)) continue;
-    for (let i = backups.length - 1; i >= 0; i -= 1) {
-      const snapshot = backups[i]?.snapshot;
+    for (let idx = backups.length - 1; idx >= 0; idx -= 1) {
+      const snapshot = backups[idx]?.snapshot;
       if (snapshot && typeof snapshot === "object") return normalizeState(snapshot);
     }
   }
@@ -298,12 +392,12 @@ function loadState() {
 
 function saveState(state, forceBackup = false) {
   const now = Date.now();
-  const payload = { ...state, version: 2, updatedAt: new Date(now).toISOString() };
+  const payload = { ...state, version: 3, updatedAt: new Date(now).toISOString() };
 
   try {
     window.localStorage.setItem(SAVE_KEY, JSON.stringify(payload));
   } catch {
-    return { ok: false, error: "No se pudo guardar.", backupCount: 0, lastSavedAt: null, lastBackupAt: null };
+    return { ok: false, error: "No se pudo guardar en localStorage.", backupCount: 0, lastSavedAt: null, lastBackupAt: null };
   }
 
   const backups = parseJson(window.localStorage.getItem(BACKUP_KEY), []);
@@ -332,9 +426,38 @@ function saveState(state, forceBackup = false) {
 
 function formatDate(input) {
   if (!input) return "--";
-  const d = new Date(input);
-  if (Number.isNaN(d.getTime())) return String(input);
-  return d.toLocaleString("es-MX", { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  const date = new Date(input);
+  if (Number.isNaN(date.getTime())) return String(input);
+  return date.toLocaleString("es-MX", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function getExerciseHistory(trainingLogs, dayId, exerciseId) {
+  const dayLogs = trainingLogs?.[dayId] || {};
+  const history = Object.entries(dayLogs)
+    .map(([date, byExercise]) => {
+      const sets = Array.isArray(byExercise?.[exerciseId]) ? byExercise[exerciseId] : [];
+      return { date, sets };
+    })
+    .filter((entry) => entry.sets.length > 0)
+    .sort((a, b) => b.date.localeCompare(a.date));
+
+  return history.map((entry) => {
+    const max = Math.max(...entry.sets.map((item) => Number(item.weight) || 0));
+    const avg = averageWeight(entry.sets);
+    const last = entry.sets[entry.sets.length - 1];
+    return {
+      ...entry,
+      max,
+      avg,
+      last,
+    };
+  });
 }
 
 function AccessGate({ onUnlock }) {
@@ -355,7 +478,7 @@ function AccessGate({ onUnlock }) {
       <div className="gate-card">
         <p className="gate-tag">LOCK IN</p>
         <h1>Acceso privado</h1>
-        <p className="gate-sub">Ingresa tu clave para abrir el panel.</p>
+        <p className="gate-sub">Ingresa la clave para abrir tu panel.</p>
         <form onSubmit={onSubmit} className="stack gap-8">
           <input
             className="input"
@@ -399,29 +522,26 @@ function Field({ label, value, onChange, type = "text", step, placeholder }) {
   );
 }
 
-function ExerciseLogCard({ week, dayId, exercise, logs, onAddSet, onRemoveSet }) {
+function ExerciseLogCard({ dayId, exercise, sessionDate, trainingLogs, onAddSet, onRemoveSet }) {
   const [weight, setWeight] = useState("");
   const [reps, setReps] = useState("");
 
-  const key = workoutKey(week, dayId, exercise.id);
-  const sets = logs[key] || [];
-  const previous = week > 1 ? logs[workoutKey(week - 1, dayId, exercise.id)] || [] : [];
+  const currentSets = trainingLogs?.[dayId]?.[sessionDate]?.[exercise.id] || [];
+  const history = useMemo(() => getExerciseHistory(trainingLogs, dayId, exercise.id), [trainingLogs, dayId, exercise.id]);
 
-  const trend = useMemo(() => {
-    const currentAvg = averageWeight(sets);
-    const previousAvg = averageWeight(previous);
-    if (currentAvg === null || previousAvg === null) return null;
-    const delta = currentAvg - previousAvg;
-    const sign = delta > 0 ? "+" : "";
-    return `${sign}${delta.toFixed(1)}kg vs semana anterior`;
-  }, [sets, previous]);
+  const previous = useMemo(() => {
+    const strictPrevious = history.find((entry) => entry.date < sessionDate);
+    if (strictPrevious) return strictPrevious;
+    const differentDate = history.find((entry) => entry.date !== sessionDate);
+    return differentDate || null;
+  }, [history, sessionDate]);
 
   const addSet = () => {
     const parsedWeight = Number(weight);
     const parsedReps = Number(reps);
     if (Number.isNaN(parsedWeight) || parsedWeight <= 0) return;
     if (Number.isNaN(parsedReps) || parsedReps <= 0) return;
-    onAddSet(dayId, exercise.id, { weight: parsedWeight, reps: parsedReps, ts: Date.now() });
+    onAddSet(dayId, sessionDate, exercise.id, { weight: parsedWeight, reps: parsedReps, ts: Date.now() });
     setWeight("");
     setReps("");
   };
@@ -433,16 +553,21 @@ function ExerciseLogCard({ week, dayId, exercise, logs, onAddSet, onRemoveSet })
         <span className="pill">{exercise.sets} x {exercise.reps}</span>
       </div>
       <p className="exercise-meta">Descanso: {exercise.rest} · {exercise.note || "sin nota"}</p>
-      {trend && <p className="trend">{trend}</p>}
 
-      {sets.length > 0 && (
+      {previous && (
+        <p className="trend">
+          Ultima vez ({previous.date}): {previous.last.weight}kg x {previous.last.reps} · max {previous.max}kg
+        </p>
+      )}
+
+      {currentSets.length > 0 && (
         <div className="set-list">
-          {sets.map((entry, index) => (
+          {currentSets.map((entry, index) => (
             <button
               key={`${exercise.id}_${index}_${entry.ts}`}
               type="button"
               className="set-chip"
-              onClick={() => onRemoveSet(dayId, exercise.id, index)}
+              onClick={() => onRemoveSet(dayId, sessionDate, exercise.id, index)}
               title="Tap para borrar"
             >
               S{index + 1}: {entry.weight}kg x {entry.reps}
@@ -462,10 +587,11 @@ function ExerciseLogCard({ week, dayId, exercise, logs, onAddSet, onRemoveSet })
 
 export default function App() {
   const [state, setState] = useState(() => loadState());
-  const [saveMeta, setSaveMeta] = useState(() => ({ ok: true, error: null, backupCount: 0, lastSavedAt: null, lastBackupAt: null }));
+  const [saveMeta, setSaveMeta] = useState({ ok: true, error: null, backupCount: 0, lastSavedAt: null, lastBackupAt: null });
   const [tab, setTab] = useState("rutina");
   const [routineEditMode, setRoutineEditMode] = useState(false);
   const [dietEditMode, setDietEditMode] = useState(false);
+  const [supplementEditMode, setSupplementEditMode] = useState(false);
   const [weightForm, setWeightForm] = useState({ date: new Date().toISOString().slice(0, 10), weight: "", waist: "" });
   const [isUnlocked, setIsUnlocked] = useState(() => window.sessionStorage.getItem(SESSION_UNLOCK_KEY) === "1");
 
@@ -478,8 +604,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const result = saveState(state);
-    setSaveMeta(result);
+    setSaveMeta(saveState(state));
   }, [state]);
 
   const unlock = () => {
@@ -500,10 +625,14 @@ export default function App() {
   );
 
   const latestWeight = sortedWeightLogs.length > 0 ? Number(sortedWeightLogs[0].weight) : Number(state.settings.startWeight) || 0;
-  const totalSetsLogged = useMemo(
-    () => Object.values(state.trainingLogs).reduce((acc, items) => acc + items.length, 0),
-    [state.trainingLogs]
-  );
+
+  const totalSetsLogged = useMemo(() => {
+    return Object.values(state.trainingLogs).reduce((accDays, byDate) => {
+      return accDays + Object.values(byDate || {}).reduce((accDates, byExercise) => {
+        return accDates + Object.values(byExercise || {}).reduce((accEx, sets) => accEx + (Array.isArray(sets) ? sets.length : 0), 0);
+      }, 0);
+    }, 0);
+  }, [state.trainingLogs]);
 
   const deltaFromStart = latestWeight - Number(state.settings.startWeight || 0);
   const toGoal = latestWeight - Number(state.settings.goalWeight || 0);
@@ -526,20 +655,36 @@ export default function App() {
     setState((prev) => ({ ...prev, dayIndex: clamp(index, 0, prev.routine.length - 1) }));
   };
 
-  const addSetLog = (dayId, exerciseId, payload) => {
+  const setSessionDate = (date) => {
+    setState((prev) => ({ ...prev, sessionDate: date }));
+  };
+
+  const addSetLog = (dayId, date, exerciseId, payload) => {
     setState((prev) => {
-      const key = workoutKey(prev.week, dayId, exerciseId);
-      const nextSets = [...(prev.trainingLogs[key] || []), payload];
-      return { ...prev, trainingLogs: { ...prev.trainingLogs, [key]: nextSets } };
+      const dayLogs = { ...(prev.trainingLogs[dayId] || {}) };
+      const dateLogs = { ...(dayLogs[date] || {}) };
+      const sets = [...(dateLogs[exerciseId] || []), payload];
+      dateLogs[exerciseId] = sets;
+      dayLogs[date] = dateLogs;
+      return {
+        ...prev,
+        trainingLogs: { ...prev.trainingLogs, [dayId]: dayLogs },
+      };
     });
   };
 
-  const removeSetLog = (dayId, exerciseId, setIndex) => {
+  const removeSetLog = (dayId, date, exerciseId, index) => {
     setState((prev) => {
-      const key = workoutKey(prev.week, dayId, exerciseId);
-      const nextSets = [...(prev.trainingLogs[key] || [])];
-      nextSets.splice(setIndex, 1);
-      return { ...prev, trainingLogs: { ...prev.trainingLogs, [key]: nextSets } };
+      const dayLogs = { ...(prev.trainingLogs[dayId] || {}) };
+      const dateLogs = { ...(dayLogs[date] || {}) };
+      const sets = [...(dateLogs[exerciseId] || [])];
+      sets.splice(index, 1);
+      dateLogs[exerciseId] = sets;
+      dayLogs[date] = dateLogs;
+      return {
+        ...prev,
+        trainingLogs: { ...prev.trainingLogs, [dayId]: dayLogs },
+      };
     });
   };
 
@@ -547,15 +692,29 @@ export default function App() {
     const weight = Number(weightForm.weight);
     const waist = weightForm.waist === "" ? null : Number(weightForm.waist);
     if (!weightForm.date || Number.isNaN(weight) || weight <= 0) return;
+
     setState((prev) => ({
       ...prev,
-      weightLogs: [...prev.weightLogs, { id: makeId("w"), date: weightForm.date, weight, waist: Number.isNaN(waist) ? null : waist, ts: Date.now() }],
+      weightLogs: [
+        ...prev.weightLogs,
+        {
+          id: makeId("w"),
+          date: weightForm.date,
+          weight,
+          waist: Number.isNaN(waist) ? null : waist,
+          ts: Date.now(),
+        },
+      ],
     }));
+
     setWeightForm((prev) => ({ ...prev, weight: "", waist: "" }));
   };
 
   const removeWeightLog = (id) => {
-    setState((prev) => ({ ...prev, weightLogs: prev.weightLogs.filter((entry) => entry.id !== id) }));
+    setState((prev) => ({
+      ...prev,
+      weightLogs: prev.weightLogs.filter((entry) => entry.id !== id),
+    }));
   };
 
   const updateSelectedDay = (field, value) => {
@@ -570,16 +729,7 @@ export default function App() {
     setState((prev) => {
       const routine = [
         ...prev.routine,
-        {
-          id: makeId("d"),
-          shortDay: "NEW",
-          fullDay: "Nuevo dia",
-          type: "Fuerza",
-          title: "Nueva sesion",
-          postCardio: "",
-          cardioProtocol: "",
-          exercises: [],
-        },
+        { id: makeId("d"), shortDay: "NEW", fullDay: "Nuevo dia", type: "Fuerza", title: "Nueva sesion", postCardio: "", cardioProtocol: "", exercises: [] },
       ];
       return { ...prev, routine, dayIndex: routine.length - 1 };
     });
@@ -598,10 +748,7 @@ export default function App() {
     setState((prev) => {
       const routine = [...prev.routine];
       const day = { ...routine[prev.dayIndex] };
-      day.exercises = [
-        ...day.exercises,
-        { id: makeId("e"), name: "Nuevo ejercicio", sets: "3", reps: "8-10", rest: "90s", note: "" },
-      ];
+      day.exercises = [...day.exercises, { id: makeId("e"), name: "Nuevo ejercicio", sets: "3", reps: "8-10", rest: "90s", note: "" }];
       routine[prev.dayIndex] = day;
       return { ...prev, routine };
     });
@@ -632,10 +779,7 @@ export default function App() {
   const addMeal = () => {
     setState((prev) => ({
       ...prev,
-      dietMeals: [
-        ...prev.dietMeals,
-        { id: makeId("m"), title: "Nueva comida", time: "", note: "", options: [] },
-      ],
+      dietMeals: [...prev.dietMeals, { id: makeId("m"), title: "Nueva comida", time: "", note: "", options: [] }],
     }));
   };
 
@@ -656,13 +800,7 @@ export default function App() {
       ...prev,
       dietMeals: prev.dietMeals.map((meal) =>
         meal.id === mealId
-          ? {
-              ...meal,
-              options: [
-                ...meal.options,
-                { id: makeId("o"), name: "Nuevo platillo", kcal: 0, protein: 0, carbs: 0, fats: 0, description: "" },
-              ],
-            }
+          ? { ...meal, options: [...meal.options, { id: makeId("o"), name: "Nuevo platillo", kcal: 0, protein: 0, carbs: 0, fats: 0, description: "" }] }
           : meal
       ),
     }));
@@ -694,6 +832,24 @@ export default function App() {
           }),
         };
       }),
+    }));
+  };
+
+  const addSupplement = () => {
+    setState((prev) => ({
+      ...prev,
+      supplements: [...prev.supplements, { id: makeId("sup"), status: "Actual", name: "Nuevo suplemento", dose: "", timing: "", note: "" }],
+    }));
+  };
+
+  const removeSupplement = (id) => {
+    setState((prev) => ({ ...prev, supplements: prev.supplements.filter((item) => item.id !== id) }));
+  };
+
+  const updateSupplement = (id, field, value) => {
+    setState((prev) => ({
+      ...prev,
+      supplements: prev.supplements.map((item) => (item.id === id ? { ...item, [field]: value } : item)),
     }));
   };
 
@@ -732,7 +888,7 @@ export default function App() {
   };
 
   const resetDefaults = () => {
-    if (!window.confirm("Restaurar rutina y dieta por defecto?")) return;
+    if (!window.confirm("Restaurar rutina/dieta/suplementos por defecto?")) return;
     setState(normalizeState(DEFAULT_STATE));
   };
 
@@ -755,11 +911,11 @@ export default function App() {
         <StatCard label="Peso actual" value={`${latestWeight.toFixed(1)}kg`} meta={`Inicio ${state.settings.startWeight}kg`} tone="accent" />
         <StatCard label="Cambio total" value={`${deltaFromStart > 0 ? "+" : ""}${deltaFromStart.toFixed(1)}kg`} meta="Desde inicio" tone={deltaFromStart <= 0 ? "good" : "danger"} />
         <StatCard label="A meta" value={`${toGoal > 0 ? "+" : ""}${toGoal.toFixed(1)}kg`} meta={`Objetivo ${state.settings.goalWeight}kg`} tone={toGoal <= 0 ? "good" : "warning"} />
-        <StatCard label="Sets registrados" value={`${totalSetsLogged}`} meta={`Semana ${state.week}`} tone="good" />
+        <StatCard label="Sets registrados" value={`${totalSetsLogged}`} meta={`Fecha activa ${state.sessionDate}`} tone="good" />
       </section>
 
       <nav className="tabs">
-        {[ ["rutina", "Rutina"], ["progreso", "Progreso"], ["dieta", "Dieta"], ["config", "Config"] ].map(([id, label]) => (
+        {[ ["rutina", "Rutina"], ["progreso", "Progreso"], ["dieta", "Dieta"], ["suplementos", "Suplementos"], ["config", "Config"] ].map(([id, label]) => (
           <button key={id} type="button" className={`tab ${tab === id ? "active" : ""}`} onClick={() => setTab(id)}>{label}</button>
         ))}
       </nav>
@@ -768,19 +924,22 @@ export default function App() {
         <section className="panel">
           <div className="row space-between wrap">
             <h2>Rutina</h2>
-            <div className="row gap-8">
+            <div className="row gap-8 wrap">
               <button className="btn btn-ghost" type="button" onClick={() => changeWeek(-1)}>Semana -</button>
               <span className="week-badge">Semana {state.week}</span>
               <button className="btn btn-ghost" type="button" onClick={() => changeWeek(1)}>Semana +</button>
             </div>
           </div>
 
+          <div className="grid-two top-8">
+            <Field label="Fecha de entrenamiento" type="date" value={state.sessionDate} onChange={setSessionDate} />
+            <button className="btn btn-ghost" type="button" onClick={() => setSessionDate(new Date().toISOString().slice(0, 10))}>Usar hoy</button>
+          </div>
+
           <div className="day-chip-row">
             {state.routine.map((day, index) => {
-              const hasLogs = day.exercises.some((exercise) => {
-                const key = workoutKey(state.week, day.id, exercise.id);
-                return (state.trainingLogs[key] || []).length > 0;
-              });
+              const dateLogs = state.trainingLogs?.[day.id]?.[state.sessionDate] || {};
+              const hasLogs = day.exercises.some((exercise) => Array.isArray(dateLogs?.[exercise.id]) && dateLogs[exercise.id].length > 0);
               return (
                 <button key={day.id} type="button" className={`day-chip ${index === state.dayIndex ? "active" : ""}`} onClick={() => selectDay(index)}>
                   {day.shortDay}
@@ -809,10 +968,10 @@ export default function App() {
               {selectedDay.exercises.map((exercise) => (
                 <ExerciseLogCard
                   key={exercise.id}
-                  week={state.week}
                   dayId={selectedDay.id}
                   exercise={exercise}
-                  logs={state.trainingLogs}
+                  sessionDate={state.sessionDate}
+                  trainingLogs={state.trainingLogs}
                   onAddSet={addSetLog}
                   onRemoveSet={removeSetLog}
                 />
@@ -822,7 +981,7 @@ export default function App() {
 
           {!routineEditMode && selectedDay.exercises.length === 0 && (
             <article className="card top-10">
-              <p className="muted">Dia de cardio. Activa "Editar rutina" si quieres agregar ejercicios.</p>
+              <p className="muted">Dia de cardio. Si quieres agregar ejercicios en este bloque, activa "Editar rutina".</p>
             </article>
           )}
 
@@ -875,17 +1034,17 @@ export default function App() {
 
       {tab === "progreso" && (
         <section className="panel">
-          <h2>Progreso corporal</h2>
+          <h2>Progreso</h2>
           <div className="grid-three top-8">
             <Field label="Fecha" type="date" value={weightForm.date} onChange={(value) => setWeightForm((prev) => ({ ...prev, date: value }))} />
             <Field label="Peso (kg)" type="number" step="0.1" value={weightForm.weight} onChange={(value) => setWeightForm((prev) => ({ ...prev, weight: value }))} placeholder="78.3" />
             <Field label="Cintura (cm)" type="number" step="0.1" value={weightForm.waist} onChange={(value) => setWeightForm((prev) => ({ ...prev, waist: value }))} placeholder="Opcional" />
           </div>
-          <button className="btn btn-primary top-8" type="button" onClick={addWeightLog}>Guardar registro</button>
+          <button className="btn btn-primary top-8" type="button" onClick={addWeightLog}>Guardar peso</button>
 
           <article className="card top-12">
-            <h4>Historial</h4>
-            {sortedWeightLogs.length === 0 && <p className="muted">Aun no hay registros.</p>}
+            <h4>Historial de peso corporal</h4>
+            {sortedWeightLogs.length === 0 && <p className="muted top-8">Aun no hay registros.</p>}
             <div className="stack gap-8 top-8">
               {sortedWeightLogs.map((entry) => (
                 <div key={entry.id} className="log-row">
@@ -896,6 +1055,39 @@ export default function App() {
                   <button className="btn btn-danger" type="button" onClick={() => removeWeightLog(entry.id)}>Borrar</button>
                 </div>
               ))}
+            </div>
+          </article>
+
+          <article className="card top-12">
+            <h4>Progreso por bloque y ejercicio</h4>
+            <div className="stack gap-10 top-8">
+              {state.routine.map((day) => {
+                const exercisesWithHistory = day.exercises
+                  .map((exercise) => ({ exercise, history: getExerciseHistory(state.trainingLogs, day.id, exercise.id) }))
+                  .filter((entry) => entry.history.length > 0);
+
+                if (!exercisesWithHistory.length) return null;
+
+                return (
+                  <div key={day.id} className="exercise-editor">
+                    <h5>{day.fullDay} · {day.title}</h5>
+                    <div className="stack gap-8 top-8">
+                      {exercisesWithHistory.map(({ exercise, history }) => (
+                        <div key={exercise.id} className="dish-card">
+                          <strong>{exercise.name}</strong>
+                          <div className="stack gap-8 top-6">
+                            {history.map((entry) => (
+                              <p key={`${exercise.id}_${entry.date}`} className="muted small">
+                                {entry.date}: max {entry.max}kg · promedio {entry.avg?.toFixed(1)}kg · sets {entry.sets.length}
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </article>
         </section>
@@ -982,6 +1174,52 @@ export default function App() {
         </section>
       )}
 
+      {tab === "suplementos" && (
+        <section className="panel">
+          <div className="row space-between wrap">
+            <h2>Suplementacion</h2>
+            <button className="btn btn-ghost" type="button" onClick={() => setSupplementEditMode((prev) => !prev)}>
+              {supplementEditMode ? "Cerrar edicion" : "Editar suplementacion"}
+            </button>
+          </div>
+
+          <p className="muted top-8">Base precargada de tu plan original. Puedes agregar, editar o borrar libremente.</p>
+
+          {supplementEditMode && <button className="btn btn-primary top-10" type="button" onClick={addSupplement}>Agregar suplemento</button>}
+
+          <div className="stack gap-10 top-10">
+            {state.supplements.map((item) => (
+              <article key={item.id} className="card">
+                {supplementEditMode ? (
+                  <>
+                    <div className="grid-two">
+                      <Field label="Estado" value={item.status} onChange={(value) => updateSupplement(item.id, "status", value)} />
+                      <Field label="Suplemento" value={item.name} onChange={(value) => updateSupplement(item.id, "name", value)} />
+                      <Field label="Dosis" value={item.dose} onChange={(value) => updateSupplement(item.id, "dose", value)} />
+                      <Field label="Cuando" value={item.timing} onChange={(value) => updateSupplement(item.id, "timing", value)} />
+                    </div>
+                    <label className="field top-8">
+                      <span>Nota</span>
+                      <textarea className="input" rows={2} value={item.note} onChange={(event) => updateSupplement(item.id, "note", event.target.value)} />
+                    </label>
+                    <button className="btn btn-danger top-8" type="button" onClick={() => removeSupplement(item.id)}>Borrar suplemento</button>
+                  </>
+                ) : (
+                  <>
+                    <div className="row space-between wrap">
+                      <h4>{item.name}</h4>
+                      <span className="pill">{item.status}</span>
+                    </div>
+                    <p className="muted top-6">{item.dose} · {item.timing}</p>
+                    <p className="muted top-6">{item.note}</p>
+                  </>
+                )}
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
       {tab === "config" && (
         <section className="panel">
           <h2>Configuracion</h2>
@@ -1012,6 +1250,7 @@ export default function App() {
               <li>Guardado automatico: {saveMeta.lastSavedAt ? formatDate(saveMeta.lastSavedAt) : "--"}</li>
               <li>Backups locales: {saveMeta.backupCount}</li>
               <li>Ultimo checkpoint: {saveMeta.lastBackupAt ? formatDate(new Date(saveMeta.lastBackupAt).toISOString()) : "--"}</li>
+              <li>Registros por fecha: activos por cada bloque/ejercicio</li>
               <li>Clave env: {USING_FALLBACK_KEY ? "fallback activa" : "configurada"}</li>
             </ul>
             {saveMeta.error && <p className="error-text">{saveMeta.error}</p>}

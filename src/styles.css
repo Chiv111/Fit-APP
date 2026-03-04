@@ -635,9 +635,10 @@ textarea.input {
 
 .date-control-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) 42px;
   gap: 8px;
   align-items: center;
+  width: 100%;
 }
 
 .date-input-main {
@@ -645,11 +646,19 @@ textarea.input {
   width: 100%;
 }
 
-.btn-date-inline {
-  min-width: 72px;
-  min-height: 44px;
-  white-space: nowrap;
-  padding-inline: 12px;
+.btn-date-icon {
+  min-width: 42px;
+  width: 42px;
+  min-height: 42px;
+  height: 42px;
+  padding: 0;
+  border-radius: 11px;
+}
+
+.btn-date-icon svg {
+  width: 18px;
+  height: 18px;
+  display: block;
 }
 
 .gate-card h1 {
@@ -687,11 +696,4 @@ textarea.input {
   .log-row { align-items: center; }
 }
 
-@media (max-width: 520px) {
-  .date-control-row {
-    grid-template-columns: 1fr;
-  }
-  .btn-date-inline {
-    width: 100%;
-  }
-}
+

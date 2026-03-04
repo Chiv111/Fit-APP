@@ -2099,7 +2099,19 @@ export default function App() {
                 value={state.sessionDate}
                 onChange={(event) => setSessionDate(event.target.value)}
               />
-              <button className="btn btn-ghost btn-date-inline" type="button" onClick={() => setSessionDate(mexicoDate())}>Hoy</button>
+              <button
+                className="btn btn-ghost btn-date-icon"
+                type="button"
+                onClick={() => setSessionDate(mexicoDate())}
+                aria-label="Usar fecha de hoy"
+                title="Hoy"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="3.5" y="5.5" width="17" height="15" rx="3" fill="none" stroke="currentColor" strokeWidth="1.8" />
+                  <path d="M7 3.5v4M17 3.5v4M3.5 9.5h17" fill="none" stroke="currentColor" strokeWidth="1.8" />
+                  <circle cx="12" cy="14.5" r="2.2" fill="currentColor" />
+                </svg>
+              </button>
             </div>
           </div>
           <p className="muted small top-6">Zona horaria activa: UTC-6 (Ciudad de México).</p>

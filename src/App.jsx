@@ -16,6 +16,7 @@ const SUPABASE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY || "").trim();
 const SUPABASE_PROFILE_KEY = (import.meta.env.VITE_SUPABASE_PROFILE_KEY || "sebastian-main").trim();
 const CLOUD_TABLE = "lockin_state";
 const CLOUD_SYNC_DEBOUNCE_MS = 1500;
+const APP_TIMEZONE = "America/Mexico_City";
 
 const CLOUD_ENABLED = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY && SUPABASE_PROFILE_KEY);
 const supabase = CLOUD_ENABLED
@@ -204,7 +205,7 @@ const DEFAULT_SUPPLEMENTS = [
 const DEFAULT_STATE = {
   week: 1,
   dayIndex: 0,
-  sessionDate: new Date().toISOString().slice(0, 10),
+  sessionDate: mexicoDate(),
   settings: DEFAULT_SETTINGS,
   routine: DEFAULT_ROUTINE,
   dietMeals: DEFAULT_DIET_MEALS,
@@ -269,6 +270,15 @@ function makeId(prefix) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function mexicoDate(date = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: APP_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
@@ -309,7 +319,7 @@ function migrateFlatLogs(flatLogs) {
     if (!Array.isArray(value)) return;
 
     let dayId = "legacy_day";
-    let date = new Date().toISOString().slice(0, 10);
+    let date = mexicoDate();
     let exerciseId = `legacy_${Math.random().toString(36).slice(2, 6)}`;
 
     const oldFormat = key.match(/^w(\d+)_(d_[a-z]+)_(.+)$/i);
@@ -385,7 +395,7 @@ function normalizeState(candidate) {
   return {
     week: Math.max(1, Number(candidate?.week) || 1),
     dayIndex: clamp(Number(candidate?.dayIndex) || 0, 0, routine.length - 1),
-    sessionDate: typeof candidate?.sessionDate === "string" ? candidate.sessionDate : new Date().toISOString().slice(0, 10),
+    sessionDate: typeof candidate?.sessionDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(candidate.sessionDate) ? candidate.sessionDate : mexicoDate(),
     settings: { ...DEFAULT_SETTINGS, ...(candidate?.settings || {}) },
     routine: routine.map((day, dayIndex) => ({
       id: day.id || makeId(`day${dayIndex}`),
@@ -435,7 +445,7 @@ function normalizeState(candidate) {
     weightLogs: Array.isArray(candidate?.weightLogs)
       ? candidate.weightLogs.map((entry) => ({
           id: entry.id || makeId("w"),
-          date: entry.date || new Date().toISOString().slice(0, 10),
+          date: entry.date || mexicoDate(),
           weight: Number(entry.weight) || 0,
           waist: entry.waist === null || entry.waist === undefined ? null : Number(entry.waist),
           ts: entry.ts || Date.now(),
@@ -550,6 +560,7 @@ function formatDate(input) {
   const date = new Date(input);
   if (Number.isNaN(date.getTime())) return String(input);
   return date.toLocaleString("es-MX", {
+    timeZone: APP_TIMEZONE,
     year: "numeric",
     month: "short",
     day: "numeric",
@@ -663,11 +674,11 @@ function ExerciseLogCard({ exercise, previous, currentSets, onAddSet, onRemoveSe
         <h4>{exercise.name}</h4>
         <span className="pill">{exercise.sets} x {exercise.reps}</span>
       </div>
-      <p className="exercise-meta">Descanso: {exercise.rest} Â· {exercise.note || "sin nota"}</p>
+      <p className="exercise-meta">Descanso: {exercise.rest} - {exercise.note || "sin nota"}</p>
 
       {previous && (
         <p className="trend">
-          Ultima vez ({previous.date}): {previous.last.weight}kg x {previous.last.reps} Â· max {previous.max}kg
+          Última vez ({previous.date}): {previous.last.weight}kg x {previous.last.reps} - max {previous.max}kg
         </p>
       )}
 
@@ -700,13 +711,21 @@ export default function App() {
   const [state, setState] = useState(() => loadState());
   const [draftLogs, setDraftLogs] = useState(() => loadDrafts());
   const [saveMeta, setSaveMeta] = useState({ ok: true, error: null, backupCount: 0, lastSavedAt: null, lastBackupAt: null });
+  const [cloudMeta, setCloudMeta] = useState({
+    enabled: CLOUD_ENABLED,
+    syncedAt: null,
+    syncing: false,
+    error: null,
+  });
+  const [cloudReady, setCloudReady] = useState(!CLOUD_ENABLED);
+  const cloudSyncTimerRef = useRef(null);
   const [tab, setTab] = useState("rutina");
   const [routineEditMode, setRoutineEditMode] = useState(false);
   const [activeExerciseCard, setActiveExerciseCard] = useState(0);
   const [routineSavedMessage, setRoutineSavedMessage] = useState("");
   const [dietEditMode, setDietEditMode] = useState(false);
   const [supplementEditMode, setSupplementEditMode] = useState(false);
-  const [weightForm, setWeightForm] = useState({ date: new Date().toISOString().slice(0, 10), weight: "", waist: "" });
+  const [weightForm, setWeightForm] = useState({ date: mexicoDate(), weight: "", waist: "" });
   const [isUnlocked, setIsUnlocked] = useState(() => safeSessionGet(SESSION_UNLOCK_KEY) === "1");
 
   useEffect(() => {
@@ -718,8 +737,77 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+
+    if (!CLOUD_ENABLED) return () => {};
+
+    (async () => {
+      const cloud = await fetchCloudState();
+      if (cancelled) return;
+
+      if (!cloud.ok) {
+        setCloudMeta({ enabled: true, syncedAt: null, syncing: false, error: cloud.reason || "Error de nube" });
+        setCloudReady(true);
+        return;
+      }
+
+      const localRaw = parseJson(safeLocalGet(SAVE_KEY), {});
+      const localUpdatedAt = Date.parse(localRaw?.updatedAt || "") || 0;
+      const cloudUpdatedAt = Date.parse(cloud.cloudUpdatedAt || "") || 0;
+
+      if (cloud.payload && cloudUpdatedAt > localUpdatedAt) {
+        setState(cloud.payload);
+        setSaveMeta(saveState(cloud.payload));
+      }
+
+      setCloudMeta({
+        enabled: true,
+        syncedAt: cloud.cloudUpdatedAt || null,
+        syncing: false,
+        error: null,
+      });
+      setCloudReady(true);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     setSaveMeta(saveState(state));
   }, [state]);
+
+  useEffect(() => {
+    if (!CLOUD_ENABLED || !cloudReady) return () => {};
+
+    if (cloudSyncTimerRef.current) clearTimeout(cloudSyncTimerRef.current);
+    setCloudMeta((prev) => ({ ...prev, syncing: true }));
+
+    cloudSyncTimerRef.current = setTimeout(async () => {
+      const payload = normalizeState(state);
+      const response = await pushCloudState(payload);
+      if (!response.ok) {
+        setCloudMeta((prev) => ({
+          ...prev,
+          syncing: false,
+          error: response.reason || "No se pudo sincronizar.",
+        }));
+        return;
+      }
+
+      setCloudMeta((prev) => ({
+        ...prev,
+        syncing: false,
+        syncedAt: response.cloudUpdatedAt || new Date().toISOString(),
+        error: null,
+      }));
+    }, CLOUD_SYNC_DEBOUNCE_MS);
+
+    return () => {
+      if (cloudSyncTimerRef.current) clearTimeout(cloudSyncTimerRef.current);
+    };
+  }, [state, cloudReady]);
 
   useEffect(() => {
     saveDrafts(draftLogs);
@@ -771,8 +859,44 @@ export default function App() {
     }, 0);
   }, [state.trainingLogs]);
 
+  const routineSessions = useMemo(() => {
+    const sessions = [];
+
+    state.routine.forEach((day) => {
+      const logsByDate = state.trainingLogs?.[day.id] || {};
+      Object.entries(logsByDate).forEach(([date, byExercise]) => {
+        const exerciseRows = day.exercises
+          .map((exercise) => {
+            const sets = Array.isArray(byExercise?.[exercise.id]) ? byExercise[exercise.id] : [];
+            if (!sets.length) return null;
+            const max = Math.max(...sets.map((item) => Number(item.weight) || 0));
+            return {
+              id: exercise.id,
+              name: exercise.name,
+              setsCount: sets.length,
+              max,
+              last: sets[sets.length - 1],
+            };
+          })
+          .filter(Boolean);
+
+        if (!exerciseRows.length) return;
+        const setsCount = exerciseRows.reduce((acc, item) => acc + item.setsCount, 0);
+        sessions.push({
+          id: `${day.id}_${date}`,
+          date,
+          dayName: day.fullDay,
+          title: day.title,
+          setsCount,
+          exerciseRows,
+        });
+      });
+    });
+
+    return sessions.sort((a, b) => b.date.localeCompare(a.date));
+  }, [state.trainingLogs, state.routine]);
+
   const deltaFromStart = latestWeight - Number(state.settings.startWeight || 0);
-  const toGoal = latestWeight - Number(state.settings.goalWeight || 0);
 
   const updateSetting = (field, value) => {
     setState((prev) => ({ ...prev, settings: { ...prev.settings, [field]: value } }));
@@ -827,10 +951,39 @@ export default function App() {
     });
   };
 
+  const syncDraftToTrainingLogs = (nextDraft) => {
+    setState((prev) => {
+      const prevDateLogs = prev.trainingLogs?.[selectedDay.id]?.[state.sessionDate] || {};
+      const dayLogs = { ...(prev.trainingLogs[selectedDay.id] || {}) };
+      const dateLogs = { ...(dayLogs[state.sessionDate] || {}) };
+
+      selectedDay.exercises.forEach((exercise) => {
+        const sets = Array.isArray(nextDraft?.[exercise.id]) ? nextDraft[exercise.id].map(normalizeSet) : [];
+        if (sets.length > 0) dateLogs[exercise.id] = sets;
+        else delete dateLogs[exercise.id];
+      });
+
+      const previousSnapshot = JSON.stringify(prevDateLogs);
+      const nextSnapshot = JSON.stringify(dateLogs);
+      if (previousSnapshot === nextSnapshot) return prev;
+
+      if (Object.keys(dateLogs).length > 0) dayLogs[state.sessionDate] = dateLogs;
+      else delete dayLogs[state.sessionDate];
+
+      const nextTrainingLogs = { ...prev.trainingLogs };
+      if (Object.keys(dayLogs).length > 0) nextTrainingLogs[selectedDay.id] = dayLogs;
+      else delete nextTrainingLogs[selectedDay.id];
+
+      return { ...prev, trainingLogs: nextTrainingLogs };
+    });
+  };
+
   const addSetDraft = (exerciseId, payload) => {
     updateSessionDraft((currentDraft) => {
       const currentSets = Array.isArray(currentDraft?.[exerciseId]) ? currentDraft[exerciseId] : [];
-      return { ...currentDraft, [exerciseId]: [...currentSets, payload] };
+      const nextDraft = { ...currentDraft, [exerciseId]: [...currentSets, payload] };
+      syncDraftToTrainingLogs(nextDraft);
+      return nextDraft;
     });
     if (routineSavedMessage) setRoutineSavedMessage("");
   };
@@ -839,9 +992,10 @@ export default function App() {
     updateSessionDraft((currentDraft) => {
       const sets = [...(Array.isArray(currentDraft?.[exerciseId]) ? currentDraft[exerciseId] : [])];
       sets.splice(index, 1);
-      if (sets.length > 0) return { ...currentDraft, [exerciseId]: sets };
-      const nextDraft = { ...currentDraft };
-      delete nextDraft[exerciseId];
+      let nextDraft = { ...currentDraft };
+      if (sets.length > 0) nextDraft = { ...currentDraft, [exerciseId]: sets };
+      else delete nextDraft[exerciseId];
+      syncDraftToTrainingLogs(nextDraft);
       return nextDraft;
     });
   };
@@ -859,31 +1013,10 @@ export default function App() {
     const hasSets = selectedDay.exercises.some((exercise) => Array.isArray(sessionDraft?.[exercise.id]) && sessionDraft[exercise.id].length > 0);
     if (!hasSets && !window.confirm("No hay sets capturados. Guardar esta rutina vacia para la fecha seleccionada?")) return;
 
-    setState((prev) => {
-      const dayLogs = { ...(prev.trainingLogs[selectedDay.id] || {}) };
-      const dateLogs = { ...(dayLogs[state.sessionDate] || {}) };
-
-      selectedDay.exercises.forEach((exercise) => {
-        const sets = Array.isArray(sessionDraft?.[exercise.id]) ? sessionDraft[exercise.id].map(normalizeSet) : [];
-        if (sets.length > 0) dateLogs[exercise.id] = sets;
-        else delete dateLogs[exercise.id];
-      });
-
-      if (Object.keys(dateLogs).length > 0) dayLogs[state.sessionDate] = dateLogs;
-      else delete dayLogs[state.sessionDate];
-
-      const nextTrainingLogs = { ...prev.trainingLogs };
-      if (Object.keys(dayLogs).length > 0) nextTrainingLogs[selectedDay.id] = dayLogs;
-      else delete nextTrainingLogs[selectedDay.id];
-
-      return {
-        ...prev,
-        trainingLogs: nextTrainingLogs,
-      };
-    });
+    syncDraftToTrainingLogs(sessionDraft);
 
     clearSessionDraft();
-    setRoutineSavedMessage(`Rutina guardada: ${selectedDay.fullDay} ${state.sessionDate}`);
+    setRoutineSavedMessage(`Rutina guardada - ${selectedDay.fullDay} ${state.sessionDate}`);
     setActiveExerciseCard(selectedDay.exercises.length);
   };
 
@@ -935,14 +1068,14 @@ export default function App() {
     setState((prev) => {
       const routine = [
         ...prev.routine,
-        { id: makeId("d"), shortDay: "NEW", fullDay: "Nuevo dia", type: "Fuerza", title: "Nueva sesion", postCardio: "", cardioProtocol: "", exercises: [] },
+        { id: makeId("d"), shortDay: "NEW", fullDay: "Nuevo día", type: "Fuerza", title: "Nueva sesión", postCardio: "", cardioProtocol: "", exercises: [] },
       ];
       return { ...prev, routine, dayIndex: routine.length - 1 };
     });
   };
 
   const removeSelectedDay = () => {
-    if (!window.confirm("Borrar este dia completo?")) return;
+    if (!window.confirm("Borrar este día completo?")) return;
     setState((prev) => {
       if (prev.routine.length <= 1) return prev;
       const routine = prev.routine.filter((_, index) => index !== prev.dayIndex);
@@ -1065,7 +1198,7 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `lockin-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    link.download = `lockin-backup-${mexicoDate()}.json`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -1104,24 +1237,36 @@ export default function App() {
     <div className="app-shell">
       <header className="hero">
         <div>
-          <p className="hero-tag">LOCK IN Â· PRIVATE MODE</p>
+          <p className="hero-tag">LOCK IN - PRIVATE MODE</p>
           <h1>{state.settings.appName}</h1>
           <p className="hero-sub">
-            {state.settings.profileName} Â· {latestWeight.toFixed(1)}kg actual Â· Meta {state.settings.goalWeight}kg
+            {state.settings.profileName} - {latestWeight.toFixed(1)}kg actual - Meta {state.settings.goalWeight}kg
           </p>
         </div>
         <button className="btn btn-ghost" type="button" onClick={lock}>Bloquear</button>
       </header>
 
-      <section className="stats-grid">
-        <StatCard label="Peso actual" value={`${latestWeight.toFixed(1)}kg`} meta={`Inicio ${state.settings.startWeight}kg`} tone="accent" />
-        <StatCard label="Cambio total" value={`${deltaFromStart > 0 ? "+" : ""}${deltaFromStart.toFixed(1)}kg`} meta="Desde inicio" tone={deltaFromStart <= 0 ? "good" : "danger"} />
-        <StatCard label="A meta" value={`${toGoal > 0 ? "+" : ""}${toGoal.toFixed(1)}kg`} meta={`Objetivo ${state.settings.goalWeight}kg`} tone={toGoal <= 0 ? "good" : "warning"} />
-        <StatCard label="Sets registrados" value={`${totalSetsLogged}`} meta={`Fecha activa ${state.sessionDate}`} tone="good" />
+      <section className="kpi-strip">
+        <article className="kpi-pill">
+          <p className="kpi-label">Peso</p>
+          <p className="kpi-value">{latestWeight.toFixed(1)}kg</p>
+        </article>
+        <article className="kpi-pill">
+          <p className="kpi-label">Meta</p>
+          <p className="kpi-value">{state.settings.goalWeight}kg</p>
+        </article>
+        <article className="kpi-pill">
+          <p className="kpi-label">Cambio</p>
+          <p className="kpi-value">{`${deltaFromStart > 0 ? "+" : ""}${deltaFromStart.toFixed(1)}kg`}</p>
+        </article>
+        <article className="kpi-pill">
+          <p className="kpi-label">Sets</p>
+          <p className="kpi-value">{totalSetsLogged}</p>
+        </article>
       </section>
 
       <nav className="tabs">
-        {[ ["rutina", "Rutina"], ["progreso", "Progreso"], ["dieta", "Dieta"], ["suplementos", "Suplementos"], ["config", "Config"] ].map(([id, label]) => (
+        {[ ["rutina", "Rutina"], ["historial", "Historial"], ["progreso", "Peso"], ["dieta", "Dieta"], ["suplementos", "Suples"], ["config", "Config"] ].map(([id, label]) => (
           <button key={id} type="button" className={`tab ${tab === id ? "active" : ""}`} onClick={() => setTab(id)}>{label}</button>
         ))}
       </nav>
@@ -1139,8 +1284,9 @@ export default function App() {
 
           <div className="grid-two top-8">
             <Field label="Fecha de entrenamiento" type="date" value={state.sessionDate} onChange={setSessionDate} />
-            <button className="btn btn-ghost" type="button" onClick={() => setSessionDate(new Date().toISOString().slice(0, 10))}>Usar hoy</button>
+            <button className="btn btn-ghost" type="button" onClick={() => setSessionDate(mexicoDate())}>Usar hoy</button>
           </div>
+          <p className="muted small top-6">Zona horaria activa: UTC-6 (Ciudad de Mexico).</p>
 
           <div className="day-chip-row">
             {state.routine.map((day, index) => {
@@ -1161,7 +1307,7 @@ export default function App() {
           </div>
 
           <article className="focus-card">
-            <p className="focus-kicker">{selectedDay.fullDay} Â· {selectedDay.type}</p>
+            <p className="focus-kicker">{selectedDay.fullDay} - {selectedDay.type}</p>
             <h3>{selectedDay.title}</h3>
             <p className="muted">{selectedDay.postCardio || ""}</p>
             {selectedDay.cardioProtocol && <p className="muted top-6">{selectedDay.cardioProtocol}</p>}
@@ -1170,7 +1316,7 @@ export default function App() {
           <div className="row space-between wrap">
             <p className="muted">Caminata diaria con el perro: ~30 min (no cuenta como Z2).</p>
             <button className="btn btn-ghost" type="button" onClick={() => setRoutineEditMode((prev) => !prev)}>
-              {routineEditMode ? "Cerrar edicion" : "Editar rutina"}
+              {routineEditMode ? "Cerrar edición" : "Editar rutina"}
             </button>
           </div>
 
@@ -1207,7 +1353,7 @@ export default function App() {
                 <div className="swipe-slide">
                   <article className="exercise-card">
                     <h4>Finalizar rutina</h4>
-                    <p className="muted top-6">{selectedDay.fullDay} Â· {selectedDay.title}</p>
+                    <p className="muted top-6">{selectedDay.fullDay} - {selectedDay.title}</p>
                     <p className="muted top-6">Fecha: {state.sessionDate}</p>
                     <p className="muted top-6">Sets listos para guardar: {sessionSetCount}</p>
                     <button className="btn btn-primary top-10" type="button" onClick={finalizeRoutine}>Finalizar y guardar</button>
@@ -1227,7 +1373,7 @@ export default function App() {
           {routineEditMode && (
             <div className="stack gap-12 top-12">
               <article className="card">
-                <h4>Editar dia</h4>
+                <h4>Editar día</h4>
                 <div className="grid-two top-8">
                   <Field label="Etiqueta corta" value={selectedDay.shortDay} onChange={(value) => updateSelectedDay("shortDay", value)} />
                   <Field label="Dia completo" value={selectedDay.fullDay} onChange={(value) => updateSelectedDay("fullDay", value)} />
@@ -1240,8 +1386,8 @@ export default function App() {
                   <textarea className="input" rows={3} value={selectedDay.cardioProtocol} onChange={(event) => updateSelectedDay("cardioProtocol", event.target.value)} />
                 </label>
                 <div className="row gap-8 wrap top-8">
-                  <button className="btn btn-primary" type="button" onClick={addRoutineDay}>Agregar dia</button>
-                  <button className="btn btn-danger" type="button" onClick={removeSelectedDay}>Borrar dia</button>
+                  <button className="btn btn-primary" type="button" onClick={addRoutineDay}>Agregar día</button>
+                  <button className="btn btn-danger" type="button" onClick={removeSelectedDay}>Borrar día</button>
                 </div>
               </article>
 
@@ -1250,7 +1396,7 @@ export default function App() {
                   <h4>Editar ejercicios</h4>
                   <button className="btn btn-primary" type="button" onClick={addExercise}>Agregar ejercicio</button>
                 </div>
-                {selectedDay.exercises.length === 0 && <p className="muted top-8">Sin ejercicios en este dia.</p>}
+                {selectedDay.exercises.length === 0 && <p className="muted top-8">Sin ejercicios en este día.</p>}
                 <div className="stack gap-8 top-8">
                   {selectedDay.exercises.map((exercise) => (
                     <div key={exercise.id} className="exercise-editor">
@@ -1271,25 +1417,68 @@ export default function App() {
         </section>
       )}
 
+      {tab === "historial" && (
+        <section className="panel">
+          <h2>Historial de rutinas</h2>
+          <p className="muted top-8">Rutinas ya guardadas por fecha. Zona horaria: UTC-6 (Ciudad de Mexico).</p>
+
+          <section className="stats-grid compact top-10 stats-mini">
+            <StatCard label="Sesiones" value={`${routineSessions.length}`} meta="Rutinas guardadas" tone="accent" />
+            <StatCard label="Sets totales" value={`${totalSetsLogged}`} meta="Acumulado" tone="good" />
+            <StatCard label="Última fecha" value={routineSessions[0]?.date || "--"} meta={routineSessions[0]?.dayName || "Sin registros"} tone="warning" />
+            <StatCard label="Fecha activa" value={state.sessionDate} meta={selectedDay.fullDay} tone="good" />
+          </section>
+
+          <div className="stack gap-10 top-12">
+            {routineSessions.length === 0 && (
+              <article className="card">
+                <p className="muted">Aún no hay rutinas guardadas. Captura tus sets y toca "Finalizar y guardar".</p>
+              </article>
+            )}
+
+            {routineSessions.map((session) => (
+              <article key={session.id} className="card">
+                <div className="row space-between wrap">
+                  <h4>{session.dayName}</h4>
+                  <span className="pill">{session.date}</span>
+                </div>
+                <p className="muted top-6">{session.title}</p>
+                <p className="muted small top-6">Sets guardados: {session.setsCount}</p>
+
+                <div className="stack gap-8 top-8">
+                  {session.exerciseRows.map((item) => (
+                    <div key={item.id} className="dish-card">
+                      <strong>{item.name}</strong>
+                      <p className="muted small top-6">Sets {item.setsCount} - Max {item.max}kg - Ultimo {item.last.weight}kg x {item.last.reps}</p>
+                    </div>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
       {tab === "progreso" && (
         <section className="panel">
-          <h2>Progreso</h2>
+          <h2>Peso corporal</h2>
           <div className="grid-three top-8">
             <Field label="Fecha" type="date" value={weightForm.date} onChange={(value) => setWeightForm((prev) => ({ ...prev, date: value }))} />
             <Field label="Peso (kg)" type="number" step="0.1" value={weightForm.weight} onChange={(value) => setWeightForm((prev) => ({ ...prev, weight: value }))} placeholder="78.3" />
             <Field label="Cintura (cm)" type="number" step="0.1" value={weightForm.waist} onChange={(value) => setWeightForm((prev) => ({ ...prev, waist: value }))} placeholder="Opcional" />
           </div>
+          <p className="muted small top-6">Las fechas se calculan en horario de Ciudad de Mexico (UTC-6).</p>
           <button className="btn btn-primary top-8" type="button" onClick={addWeightLog}>Guardar peso</button>
 
           <article className="card top-12">
             <h4>Historial de peso corporal</h4>
-            {sortedWeightLogs.length === 0 && <p className="muted top-8">Aun no hay registros.</p>}
+            {sortedWeightLogs.length === 0 && <p className="muted top-8">Aún no hay registros.</p>}
             <div className="stack gap-8 top-8">
               {sortedWeightLogs.map((entry) => (
                 <div key={entry.id} className="log-row">
                   <div>
                     <strong>{entry.weight}kg</strong>
-                    <p className="muted small">{entry.date}{entry.waist !== null ? ` Â· cintura ${entry.waist}cm` : ""}</p>
+                    <p className="muted small">{entry.date}{entry.waist !== null ? ` - cintura ${entry.waist}cm` : ""}</p>
                   </div>
                   <button className="btn btn-danger" type="button" onClick={() => removeWeightLog(entry.id)}>Borrar</button>
                 </div>
@@ -1298,36 +1487,8 @@ export default function App() {
           </article>
 
           <article className="card top-12">
-            <h4>Progreso por bloque y ejercicio</h4>
-            <div className="stack gap-10 top-8">
-              {state.routine.map((day) => {
-                const exercisesWithHistory = day.exercises
-                  .map((exercise) => ({ exercise, history: getExerciseHistory(state.trainingLogs, day.id, exercise.id) }))
-                  .filter((entry) => entry.history.length > 0);
-
-                if (!exercisesWithHistory.length) return null;
-
-                return (
-                  <div key={day.id} className="exercise-editor">
-                    <h5>{day.fullDay} Â· {day.title}</h5>
-                    <div className="stack gap-8 top-8">
-                      {exercisesWithHistory.map(({ exercise, history }) => (
-                        <div key={exercise.id} className="dish-card">
-                          <strong>{exercise.name}</strong>
-                          <div className="stack gap-8 top-6">
-                            {history.map((entry) => (
-                              <p key={`${exercise.id}_${entry.date}`} className="muted small">
-                                {entry.date}: max {entry.max}kg Â· promedio {entry.avg?.toFixed(1)}kg Â· sets {entry.sets.length}
-                              </p>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+            <h4>Rutinas guardadas</h4>
+            <p className="muted top-6">Ve a la pestaña Historial para revisar cada rutina por fecha y ejercicio.</p>
           </article>
         </section>
       )}
@@ -1337,12 +1498,12 @@ export default function App() {
           <div className="row space-between wrap">
             <h2>Dieta</h2>
             <button className="btn btn-ghost" type="button" onClick={() => setDietEditMode((prev) => !prev)}>
-              {dietEditMode ? "Cerrar edicion" : "Editar dieta"}
+              {dietEditMode ? "Cerrar edición" : "Editar dieta"}
             </button>
           </div>
 
           <div className="stats-grid compact top-10">
-            <StatCard label="Calorias" value={`${state.settings.calories}`} meta="kcal/dia" tone="accent" />
+            <StatCard label="Calorías" value={`${state.settings.calories}`} meta="kcal/día" tone="accent" />
             <StatCard label="Proteina" value={`${state.settings.protein}g`} meta="Objetivo" tone="good" />
             <StatCard label="Carbos" value={`${state.settings.carbs}g`} meta="Objetivo" tone="warning" />
             <StatCard label="Grasas" value={`${state.settings.fats}g`} meta="Objetivo" tone="warning" />
@@ -1393,7 +1554,7 @@ export default function App() {
                       ) : (
                         <>
                           <h5>{option.name}</h5>
-                          <p className="muted small">{option.kcal} kcal Â· P {option.protein}g Â· C {option.carbs}g Â· G {option.fats}g</p>
+                          <p className="muted small">{option.kcal} kcal - P {option.protein}g - C {option.carbs}g - G {option.fats}g</p>
                           <p className="muted top-6">{option.description}</p>
                         </>
                       )}
@@ -1416,9 +1577,9 @@ export default function App() {
       {tab === "suplementos" && (
         <section className="panel">
           <div className="row space-between wrap">
-            <h2>Suplementacion</h2>
+            <h2>Suplementación</h2>
             <button className="btn btn-ghost" type="button" onClick={() => setSupplementEditMode((prev) => !prev)}>
-              {supplementEditMode ? "Cerrar edicion" : "Editar suplementacion"}
+              {supplementEditMode ? "Cerrar edición" : "Editar suplementación"}
             </button>
           </div>
 
@@ -1449,7 +1610,7 @@ export default function App() {
                       <h4>{item.name}</h4>
                       <span className="pill">{item.status}</span>
                     </div>
-                    <p className="muted top-6">{item.dose} Â· {item.timing}</p>
+                    <p className="muted top-6">{item.dose} - {item.timing}</p>
                     <p className="muted top-6">{item.note}</p>
                   </>
                 )}
@@ -1461,7 +1622,7 @@ export default function App() {
 
       {tab === "config" && (
         <section className="panel">
-          <h2>Configuracion</h2>
+          <h2>Configuración</h2>
           <article className="card top-10">
             <h4>Perfil y metas</h4>
             <div className="grid-two top-8">
@@ -1486,13 +1647,17 @@ export default function App() {
           <article className="card top-12">
             <h4>Proteccion de progreso</h4>
             <ul className="clean-list">
-              <li>Guardado automatico: {saveMeta.lastSavedAt ? formatDate(saveMeta.lastSavedAt) : "--"}</li>
+              <li>Zona horaria: UTC-6 (Ciudad de Mexico)</li>
+              <li>Guardado automático: {saveMeta.lastSavedAt ? formatDate(saveMeta.lastSavedAt) : "--"}</li>
               <li>Backups locales: {saveMeta.backupCount}</li>
               <li>Ultimo checkpoint: {saveMeta.lastBackupAt ? formatDate(new Date(saveMeta.lastBackupAt).toISOString()) : "--"}</li>
               <li>Registros por fecha: activos por cada bloque/ejercicio</li>
               <li>Clave env: {USING_FALLBACK_KEY ? "fallback activa" : "configurada"}</li>
+              <li>Nube Supabase: {!CLOUD_ENABLED ? "No configurada" : cloudMeta.syncing ? "Sincronizando..." : cloudMeta.error ? "Error" : "Activa"}</li>
+              {CLOUD_ENABLED && <li>Última sincronización: {cloudMeta.syncedAt ? formatDate(cloudMeta.syncedAt) : "--"}</li>}
             </ul>
             {saveMeta.error && <p className="error-text">{saveMeta.error}</p>}
+            {cloudMeta.error && <p className="error-text">{cloudMeta.error}</p>}
             <div className="row gap-8 wrap top-10">
               <button className="btn btn-primary" type="button" onClick={checkpoint}>Crear checkpoint</button>
               <button className="btn btn-ghost" type="button" onClick={exportBackup}>Exportar backup</button>

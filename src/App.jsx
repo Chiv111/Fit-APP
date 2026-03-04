@@ -897,6 +897,13 @@ export default function App() {
   }, [state.trainingLogs, state.routine]);
 
   const deltaFromStart = latestWeight - Number(state.settings.startWeight || 0);
+  const saveStatusText = cloudMeta.enabled
+    ? cloudMeta.syncing
+      ? "Guardando en nube..."
+      : cloudMeta.error
+        ? "Guardado local"
+        : "Guardado local + nube"
+    : "Guardado local";
 
   const updateSetting = (field, value) => {
     setState((prev) => ({ ...prev, settings: { ...prev.settings, [field]: value } }));
@@ -1242,6 +1249,7 @@ export default function App() {
           <p className="hero-sub">
             {state.settings.profileName} - {latestWeight.toFixed(1)}kg actual - Meta {state.settings.goalWeight}kg
           </p>
+          <p className="hero-sync">{saveStatusText}</p>
         </div>
         <button className="btn btn-ghost" type="button" onClick={lock}>Bloquear</button>
       </header>
@@ -1266,7 +1274,7 @@ export default function App() {
       </section>
 
       <nav className="tabs">
-        {[ ["rutina", "Rutina"], ["historial", "Historial"], ["progreso", "Peso"], ["dieta", "Dieta"], ["suplementos", "Suples"], ["config", "Config"] ].map(([id, label]) => (
+        {[ ["rutina", "Hoy"], ["historial", "Rutinas"], ["progreso", "Peso"], ["dieta", "Dieta"], ["suplementos", "Suples"], ["config", "Ajustes"] ].map(([id, label]) => (
           <button key={id} type="button" className={`tab ${tab === id ? "active" : ""}`} onClick={() => setTab(id)}>{label}</button>
         ))}
       </nav>

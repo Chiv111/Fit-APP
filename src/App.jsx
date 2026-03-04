@@ -37,7 +37,7 @@ const DEFAULT_SETTINGS = {
   carbs: 250,
   fats: 75,
   weeklyCardioMin: 180,
-  focusNote: "Consistencia diaria. Progresion semanal.",
+  focusNote: "Consistencia diaria. Progresión semanal.",
 };
 
 const DEFAULT_ROUTINE = [
@@ -50,8 +50,8 @@ const DEFAULT_ROUTINE = [
     postCardio: "20 min cinta Z2 post-gym",
     cardioProtocol: "",
     exercises: [
-      { id: "lun1", name: "Chin-ups", sets: "3-5", reps: "5-8", rest: "2-3 min", note: "Progresion 5x5, RIR 3-4" },
-      { id: "lun2", name: "Bench Press Smith Machine", sets: "5", reps: "5", rest: "2-3 min", note: "Progresion 5x5, RIR 3-4" },
+      { id: "lun1", name: "Chin-ups", sets: "3-5", reps: "5-8", rest: "2-3 min", note: "Progresión 5x5, RIR 3-4" },
+      { id: "lun2", name: "Bench Press Smith Machine", sets: "5", reps: "5", rest: "2-3 min", note: "Progresión 5x5, RIR 3-4" },
       { id: "lun3", name: "Elevaciones T prono", sets: "3", reps: "6-8", rest: "0s", note: "Biserie A, RIR 2" },
       { id: "lun4", name: "Lagartija diamante", sets: "4", reps: "1 min ON / 30s OFF", rest: "90s-2 min", note: "Biserie A, RIR 2" },
       { id: "lun5", name: "Flys de pecho maquina", sets: "3", reps: "8-10", rest: "0s", note: "Biserie B, RIR 1" },
@@ -70,8 +70,8 @@ const DEFAULT_ROUTINE = [
     cardioProtocol: "",
     exercises: [
       { id: "mar1", name: "Curl biceps spider", sets: "3", reps: "8-10", rest: "0s", note: "Biserie A, RIR 2" },
-      { id: "mar2", name: "Pull-ups", sets: "5", reps: "5", rest: "2-3 min", note: "Progresion 5x5, RIR 3-4" },
-      { id: "mar3", name: "Press militar", sets: "5", reps: "5", rest: "2-3 min", note: "Progresion 5x5, RIR 3-4" },
+      { id: "mar2", name: "Pull-ups", sets: "5", reps: "5", rest: "2-3 min", note: "Progresión 5x5, RIR 3-4" },
+      { id: "mar3", name: "Press militar", sets: "5", reps: "5", rest: "2-3 min", note: "Progresión 5x5, RIR 3-4" },
       { id: "mar4", name: "Remo espalda alta cable", sets: "3", reps: "6-8", rest: "0s", note: "Biserie B, RIR 1-2" },
       { id: "mar5", name: "Elevaciones laterales", sets: "3", reps: "6-8", rest: "90s-2 min", note: "Biserie B, RIR 2" },
     ],
@@ -85,7 +85,7 @@ const DEFAULT_ROUTINE = [
     postCardio: "20 min cinta Z2 post-gym",
     cardioProtocol: "",
     exercises: [
-      { id: "mie1", name: "Leg press sissy / Back squat", sets: "5", reps: "5", rest: "2-3 min", note: "Progresion 5x5, RIR 3-4" },
+      { id: "mie1", name: "Leg press sissy / Back squat", sets: "5", reps: "5", rest: "2-3 min", note: "Progresión 5x5, RIR 3-4" },
       { id: "mie2", name: "Hiperextension 45 Zercher", sets: "3", reps: "6-8", rest: "2-3 min", note: "RIR 1-2" },
       { id: "mie3", name: "Extensiones pierna isometrica", sets: "3", reps: "6-8", rest: "2-3 min", note: "RIR 1-2" },
       { id: "mie4", name: "Puente gluteo medio", sets: "2", reps: "8-10", rest: "2-3 min", note: "RIR 1" },
@@ -113,7 +113,7 @@ const DEFAULT_ROUTINE = [
     postCardio: "20 min cinta Z2 post-gym",
     cardioProtocol: "",
     exercises: [
-      { id: "vie1", name: "Peso muerto Snatch Grip", sets: "5", reps: "5", rest: "2-3 min", note: "Progresion 5x5, RIR 2-3" },
+      { id: "vie1", name: "Peso muerto Snatch Grip", sets: "5", reps: "5", rest: "2-3 min", note: "Progresión 5x5, RIR 2-3" },
       { id: "vie2", name: "Smith B-stance split squat", sets: "3", reps: "6-8", rest: "90s-2 min", note: "RIR 1-2" },
       { id: "vie3", name: "Sentadilla bulgara", sets: "2-3", reps: "6-8", rest: "90s-2 min", note: "RIR 1-2" },
       { id: "vie4", name: "Maquina de aductores", sets: "3", reps: "30 segundos", rest: "90s-2 min", note: "RIR 1" },
@@ -175,7 +175,7 @@ const DEFAULT_DIET_MEALS = [
     id: "m_cena",
     title: "Cena post-gym",
     time: "7:00-8:00pm",
-    note: "Comida fuerte: proteina + carbos + verduras + grasa saludable.",
+    note: "Comida fuerte: proteína + carbos + verduras + grasa saludable.",
     options: [
       { id: "cen_a", name: "Pechuga + arroz", kcal: 1219, protein: 107, carbs: 108, fats: 38, description: "400g pollo + 300g arroz + verduras + aceite + medio aguacate." },
       { id: "cen_b", name: "Arrachera + tortillas", kcal: 1340, protein: 95, carbs: 85, fats: 72, description: "300g arrachera + 2 huevos + 5 tortillas + verduras + aceite." },
@@ -198,7 +198,7 @@ const DEFAULT_SUPPLEMENTS = [
   { id: "sup_b", status: "Actual", name: "Complejo B", dose: "dosis actual", timing: "Manana", note: "Metabolismo energetico." },
   { id: "sup_d3k2", status: "Agregar", name: "Vitamina D3 + K2", dose: "2000-4000 IU + 100mcg", timing: "Con comida con grasa", note: "Prioridad #1." },
   { id: "sup_omega", status: "Agregar", name: "Omega-3 (EPA+DHA)", dose: "2-3g EPA+DHA", timing: "Con cena", note: "Reduce inflamacion." },
-  { id: "sup_whey", status: "Opcional", name: "Whey protein", dose: "1 scoop", timing: "Solo si faltan proteinas", note: "Completar objetivo diario." },
+  { id: "sup_whey", status: "Opcional", name: "Whey protein", dose: "1 scoop", timing: "Solo si faltan proteínas", note: "Completar objetivo diario." },
   { id: "sup_ash", status: "Opcional", name: "Ashwagandha KSM-66", dose: "300-600mg", timing: "Con cena", note: "Si hay estres alto." },
 ];
 
@@ -402,7 +402,7 @@ function normalizeState(candidate) {
       shortDay: day.shortDay || `D${dayIndex + 1}`,
       fullDay: day.fullDay || `Día ${dayIndex + 1}`,
       type: day.type || "Fuerza",
-      title: day.title || "Sesion",
+      title: day.title || "Sesión",
       postCardio: day.postCardio || "",
       cardioProtocol: day.cardioProtocol || "",
       exercises: Array.isArray(day.exercises)
@@ -567,6 +567,20 @@ function formatDate(input) {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function formatSessionDate(input) {
+  if (!input || typeof input !== "string") return "--";
+  const [year, month, day] = input.split("-").map(Number);
+  if (!year || !month || !day) return input;
+  const date = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
+  return new Intl.DateTimeFormat("es-MX", {
+    timeZone: APP_TIMEZONE,
+    weekday: "long",
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  }).format(date);
 }
 
 function getExerciseHistory(trainingLogs, dayId, exerciseId) {
@@ -755,6 +769,8 @@ export default function App() {
   const [dietEditMode, setDietEditMode] = useState(false);
   const [supplementEditMode, setSupplementEditMode] = useState(false);
   const [weightForm, setWeightForm] = useState({ date: mexicoDate(), weight: "", waist: "" });
+  const [historyQuery, setHistoryQuery] = useState("");
+  const [selectedHistorySessionId, setSelectedHistorySessionId] = useState("");
   const [isUnlocked, setIsUnlocked] = useState(() => safeSessionGet(SESSION_UNLOCK_KEY) === "1");
 
   useEffect(() => {
@@ -900,11 +916,19 @@ export default function App() {
             const sets = Array.isArray(byExercise?.[exercise.id]) ? byExercise[exercise.id] : [];
             if (!sets.length) return null;
             const max = Math.max(...sets.map((item) => Number(item.weight) || 0));
+            const avg = averageWeight(sets);
+            const volume = sets.reduce((acc, item) => {
+              const weight = Number(item.weight) || 0;
+              const reps = Number(item.reps) || 0;
+              return acc + weight * reps;
+            }, 0);
             return {
               id: exercise.id,
               name: exercise.name,
               setsCount: sets.length,
               max,
+              avg: avg ? Number(avg.toFixed(1)) : 0,
+              volume: Math.round(volume),
               last: sets[sets.length - 1],
             };
           })
@@ -912,12 +936,21 @@ export default function App() {
 
         if (!exerciseRows.length) return;
         const setsCount = exerciseRows.reduce((acc, item) => acc + item.setsCount, 0);
+        const sessionVolume = exerciseRows.reduce((acc, item) => acc + item.volume, 0);
+        const bestExercise = exerciseRows.reduce((best, item) => {
+          if (!best) return item;
+          return item.max > best.max ? item : best;
+        }, null);
         sessions.push({
           id: `${day.id}_${date}`,
+          dayId: day.id,
           date,
+          dateLabel: formatSessionDate(date),
           dayName: day.fullDay,
           title: day.title,
           setsCount,
+          sessionVolume,
+          bestExercise,
           exerciseRows,
         });
       });
@@ -925,6 +958,32 @@ export default function App() {
 
     return sessions.sort((a, b) => b.date.localeCompare(a.date));
   }, [state.trainingLogs, state.routine]);
+
+  const filteredRoutineSessions = useMemo(() => {
+    const query = historyQuery.trim().toLowerCase();
+    if (!query) return routineSessions;
+
+    return routineSessions.filter((session) => {
+      const exerciseText = session.exerciseRows.map((item) => item.name).join(" ").toLowerCase();
+      const baseText = `${session.dayName} ${session.title} ${session.date} ${session.dateLabel}`.toLowerCase();
+      return baseText.includes(query) || exerciseText.includes(query);
+    });
+  }, [historyQuery, routineSessions]);
+
+  const selectedHistorySession = useMemo(() => {
+    if (!filteredRoutineSessions.length) return null;
+    return filteredRoutineSessions.find((session) => session.id === selectedHistorySessionId) || filteredRoutineSessions[0];
+  }, [filteredRoutineSessions, selectedHistorySessionId]);
+
+  useEffect(() => {
+    if (!filteredRoutineSessions.length) {
+      if (selectedHistorySessionId) setSelectedHistorySessionId("");
+      return;
+    }
+
+    const exists = filteredRoutineSessions.some((session) => session.id === selectedHistorySessionId);
+    if (!exists) setSelectedHistorySessionId(filteredRoutineSessions[0].id);
+  }, [filteredRoutineSessions, selectedHistorySessionId]);
 
   const deltaFromStart = latestWeight - Number(state.settings.startWeight || 0);
   const saveStatusText = cloudMeta.enabled
@@ -1058,6 +1117,24 @@ export default function App() {
     const left = track.clientWidth * nextIndex;
     track.scrollTo({ left, behavior: "smooth" });
     setActiveExerciseCard(nextIndex);
+  };
+
+  const openHistorySession = (session) => {
+    if (!session) return;
+    setSelectedHistorySessionId(session.id);
+  };
+
+  const loadHistorySessionInRoutine = (session) => {
+    if (!session) return;
+
+    setState((prev) => {
+      const dayIndex = prev.routine.findIndex((day) => day.id === session.dayId);
+      if (dayIndex < 0) return prev;
+      return { ...prev, dayIndex, sessionDate: session.date };
+    });
+
+    setTab("rutina");
+    setRoutineSavedMessage(`Resumen cargado: ${session.dayName} ${session.date}`);
   };
 
   const finalizeRoutine = () => {
@@ -1338,7 +1415,7 @@ export default function App() {
             <Field label="Fecha de entrenamiento" type="date" value={state.sessionDate} onChange={setSessionDate} />
             <button className="btn btn-ghost" type="button" onClick={() => setSessionDate(mexicoDate())}>Usar hoy</button>
           </div>
-          <p className="muted small top-6">Zona horaria activa: UTC-6 (Ciudad de Mexico).</p>
+          <p className="muted small top-6">Zona horaria activa: UTC-6 (Ciudad de México).</p>
 
           <div className="day-chip-row">
             {state.routine.map((day, index) => {
@@ -1506,39 +1583,94 @@ export default function App() {
 
       {tab === "historial" && (
         <section className="panel">
-          <h2>Historial de rutinas</h2>
-          <p className="muted top-8">Rutinas ya guardadas por fecha. Zona horaria: UTC-6 (Ciudad de Mexico).</p>
+          <div className="row space-between wrap">
+            <h2>Historial de rutinas</h2>
+            <span className="pill">{filteredRoutineSessions.length}/{routineSessions.length}</span>
+          </div>
+          <p className="muted top-8">Rutinas guardadas por fecha. Zona horaria: UTC-6 (Ciudad de México).</p>
+          <div className="top-10">
+            <Field
+              label="Buscar sesión"
+              value={historyQuery}
+              onChange={setHistoryQuery}
+              placeholder="Fecha, bloque o ejercicio"
+            />
+          </div>
 
           <section className="stats-grid compact top-10 stats-mini">
-            <StatCard label="Sesiones" value={`${routineSessions.length}`} meta="Rutinas guardadas" tone="accent" />
+            <StatCard label="Sesiones visibles" value={`${filteredRoutineSessions.length}`} meta="Filtradas" tone="accent" />
             <StatCard label="Sets totales" value={`${totalSetsLogged}`} meta="Acumulado" tone="good" />
-            <StatCard label="Última fecha" value={routineSessions[0]?.date || "--"} meta={routineSessions[0]?.dayName || "Sin registros"} tone="warning" />
+            <StatCard label="Última fecha" value={filteredRoutineSessions[0]?.date || "--"} meta={filteredRoutineSessions[0]?.dayName || "Sin registros"} tone="warning" />
             <StatCard label="Fecha activa" value={state.sessionDate} meta={selectedDay.fullDay} tone="good" />
           </section>
 
+          {selectedHistorySession && (
+            <article className="card top-12 history-summary">
+              <div className="row space-between wrap">
+                <h4>Resumen del día</h4>
+                <span className="pill">{selectedHistorySession.date}</span>
+              </div>
+              <p className="muted small top-6">{selectedHistorySession.dateLabel}</p>
+              <p className="muted top-6">{selectedHistorySession.dayName} - {selectedHistorySession.title}</p>
+
+              <section className="stats-grid compact top-10 stats-mini">
+                <StatCard label="Sets" value={`${selectedHistorySession.setsCount}`} meta="Capturados" tone="accent" />
+                <StatCard label="Volumen" value={`${selectedHistorySession.sessionVolume}kg`} meta="Carga x reps" tone="good" />
+                <StatCard label="Ejercicios" value={`${selectedHistorySession.exerciseRows.length}`} meta="Con registro" tone="warning" />
+                <StatCard
+                  label="Top"
+                  value={selectedHistorySession.bestExercise ? `${selectedHistorySession.bestExercise.max}kg` : "--"}
+                  meta={selectedHistorySession.bestExercise?.name || "Sin referencia"}
+                  tone="danger"
+                />
+              </section>
+
+              <div className="stack gap-8 top-10">
+                {selectedHistorySession.exerciseRows.map((item) => (
+                  <div key={`resume_${selectedHistorySession.id}_${item.id}`} className="dish-card">
+                    <div className="row space-between wrap">
+                      <strong>{item.name}</strong>
+                      <span className="pill">{item.setsCount} sets</span>
+                    </div>
+                    <p className="muted small top-6">
+                      Máx {item.max}kg - Promedio {item.avg}kg - Último {item.last.weight}kg x {item.last.reps}
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="row gap-8 wrap top-10">
+                <button className="btn btn-primary" type="button" onClick={() => loadHistorySessionInRoutine(selectedHistorySession)}>
+                  Abrir en Rutina
+                </button>
+              </div>
+            </article>
+          )}
+
           <div className="stack gap-10 top-12">
-            {routineSessions.length === 0 && (
+            {filteredRoutineSessions.length === 0 && (
               <article className="card">
-                <p className="muted">Aún no hay rutinas guardadas. Captura tus sets y toca "Finalizar y guardar".</p>
+                <p className="muted">No hay resultados con ese filtro. Si lo limpias, verás todas tus rutinas guardadas.</p>
               </article>
             )}
 
-            {routineSessions.map((session) => (
-              <article key={session.id} className="card">
+            {filteredRoutineSessions.map((session) => (
+              <article key={session.id} className={`card history-card ${selectedHistorySession?.id === session.id ? "selected" : ""}`}>
                 <div className="row space-between wrap">
                   <h4>{session.dayName}</h4>
                   <span className="pill">{session.date}</span>
                 </div>
                 <p className="muted top-6">{session.title}</p>
                 <p className="muted small top-6">Sets guardados: {session.setsCount}</p>
+                <p className="muted small top-6">Volumen: {session.sessionVolume}kg - Top: {session.bestExercise ? `${session.bestExercise.max}kg` : "--"}</p>
 
-                <div className="stack gap-8 top-8">
-                  {session.exerciseRows.map((item) => (
-                    <div key={item.id} className="dish-card">
-                      <strong>{item.name}</strong>
-                      <p className="muted small top-6">Sets {item.setsCount} - Max {item.max}kg - Ultimo {item.last.weight}kg x {item.last.reps}</p>
-                    </div>
-                  ))}
+                <div className="row gap-8 wrap top-8">
+                  <button className="btn btn-soft btn-mini" type="button" onClick={() => openHistorySession(session)}>
+                    Cargar resumen
+                  </button>
+                  <button className="btn btn-ghost btn-mini" type="button" onClick={() => loadHistorySessionInRoutine(session)}>
+                    Ir a Rutina
+                  </button>
                 </div>
               </article>
             ))}
@@ -1554,7 +1686,7 @@ export default function App() {
             <Field label="Peso (kg)" type="number" step="0.1" value={weightForm.weight} onChange={(value) => setWeightForm((prev) => ({ ...prev, weight: value }))} placeholder="78.3" />
             <Field label="Cintura (cm)" type="number" step="0.1" value={weightForm.waist} onChange={(value) => setWeightForm((prev) => ({ ...prev, waist: value }))} placeholder="Opcional" />
           </div>
-          <p className="muted small top-6">Las fechas se calculan en horario de Ciudad de Mexico (UTC-6).</p>
+          <p className="muted small top-6">Las fechas se calculan en horario de Ciudad de México (UTC-6).</p>
           <button className="btn btn-primary top-8" type="button" onClick={addWeightLog}>Guardar peso</button>
 
           <article className="card top-12">
@@ -1732,12 +1864,12 @@ export default function App() {
           </article>
 
           <article className="card top-12">
-            <h4>Proteccion de progreso</h4>
+            <h4>Protección de progreso</h4>
             <ul className="clean-list">
-              <li>Zona horaria: UTC-6 (Ciudad de Mexico)</li>
+              <li>Zona horaria: UTC-6 (Ciudad de México)</li>
               <li>Guardado automático: {saveMeta.lastSavedAt ? formatDate(saveMeta.lastSavedAt) : "--"}</li>
               <li>Backups locales: {saveMeta.backupCount}</li>
-              <li>Ultimo checkpoint: {saveMeta.lastBackupAt ? formatDate(new Date(saveMeta.lastBackupAt).toISOString()) : "--"}</li>
+              <li>Último checkpoint: {saveMeta.lastBackupAt ? formatDate(new Date(saveMeta.lastBackupAt).toISOString()) : "--"}</li>
               <li>Registros por fecha: activos por cada bloque/ejercicio</li>
               <li>Clave env: {USING_FALLBACK_KEY ? "fallback activa" : "configurada"}</li>
               <li>Nube Supabase: {!CLOUD_ENABLED ? "No configurada" : cloudMeta.syncing ? "Sincronizando..." : cloudMeta.error ? "Error" : "Activa"}</li>
@@ -1762,7 +1894,7 @@ export default function App() {
               <li>Abre tu URL en Safari.</li>
               <li>Toca Compartir.</li>
               <li>Selecciona "Agregar a pantalla de inicio".</li>
-              <li>Abrela desde home como app.</li>
+              <li>Ábrela desde home como app.</li>
             </ol>
           </article>
         </section>

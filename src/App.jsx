@@ -676,7 +676,7 @@ function AccessGate({ onUnlock }) {
   return (
     <div className="gate-shell">
       <div className="gate-card">
-        <p className="gate-tag">LOCK IN</p>
+        <p className="gate-tag">APP</p>
           <h1>Acceso privado</h1>
         <p className="gate-sub">Ingresa la clave para abrir tu panel.</p>
         <form onSubmit={onSubmit} className="stack gap-8">
@@ -726,7 +726,7 @@ function SupabaseAuthGate({
   return (
     <div className="gate-shell">
       <div className="gate-card">
-        <p className="gate-tag">LOCK IN AUTH</p>
+        <p className="gate-tag">AUTH</p>
         <h1>Acceso con Supabase</h1>
         {!configured && <p className="error-text">Configura VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY.</p>}
         {configured && (
@@ -1438,6 +1438,10 @@ export default function App() {
     return Object.values(map).sort((a, b) => b.max - a.max).slice(0, 8);
   }, [routineSessions]);
 
+  const visibleAppName = String(state.settings.appName || "").trim().toLowerCase() === "lock in"
+    ? "Progreso"
+    : state.settings.appName;
+
   const deltaFromStart = latestWeight - Number(state.settings.startWeight || 0);
   const restRemainingSec = restTimer.endAt ? Math.max(0, Math.ceil((restTimer.endAt - timerNow) / 1000)) : 0;
   const saveStatusText = !cloudMeta.enabled
@@ -1923,7 +1927,7 @@ export default function App() {
       <html>
         <head>
           <meta charset="utf-8" />
-          <title>LOCK IN - Reporte</title>
+          <title>Reporte de progreso</title>
           <style>
             body { font-family: Arial, sans-serif; margin: 24px; color: #111; }
             h1, h2 { margin: 0 0 10px; }
@@ -1935,7 +1939,7 @@ export default function App() {
           </style>
         </head>
         <body>
-          <h1>LOCK IN - Reporte de progreso</h1>
+          <h1>Reporte de progreso</h1>
           <p class="muted">Generado ${formatDate(new Date().toISOString())}</p>
           <h2>Peso actual: ${latestWeight.toFixed(1)}kg</h2>
           <p class="muted">Meta: ${state.settings.goalWeight}kg | Cambio: ${deltaFromStart > 0 ? "+" : ""}${deltaFromStart.toFixed(1)}kg</p>
@@ -1963,7 +1967,7 @@ export default function App() {
   };
 
   const exportBackup = () => {
-    const payload = { exportedAt: new Date().toISOString(), app: "LOCK IN", state };
+    const payload = { exportedAt: new Date().toISOString(), app: "Gym Progress", state };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -2008,7 +2012,7 @@ export default function App() {
     return (
       <div className="gate-shell">
         <div className="gate-card">
-          <p className="gate-tag">LOCK IN AUTH</p>
+          <p className="gate-tag">AUTH</p>
           <h1>Cargando sesion...</h1>
           <p className="gate-sub">Espera un momento.</p>
         </div>
@@ -2039,10 +2043,7 @@ export default function App() {
     <div className="app-shell">
       <header className="hero">
         <div>
-          <p className="hero-tag">
-            {REQUIRE_SUPABASE_AUTH ? "LOCK IN - SUPABASE AUTH" : "LOCK IN - PRIVATE MODE"}
-          </p>
-          <h1>{state.settings.appName}</h1>
+          <h1>{visibleAppName}</h1>
           <p className="hero-sub">
             {state.settings.profileName} - {latestWeight.toFixed(1)}kg actual - Meta {state.settings.goalWeight}kg
           </p>
@@ -2089,9 +2090,11 @@ export default function App() {
             </div>
           </div>
 
-          <div className="grid-two top-8">
-            <Field label="Fecha" type="date" value={state.sessionDate} onChange={setSessionDate} />
-            <button className="btn btn-ghost" type="button" onClick={() => setSessionDate(mexicoDate())}>Usar hoy</button>
+          <div className="date-row top-8">
+            <div className="date-row-field">
+              <Field label="Fecha" type="date" value={state.sessionDate} onChange={setSessionDate} />
+            </div>
+            <button className="btn btn-ghost btn-date" type="button" onClick={() => setSessionDate(mexicoDate())}>Hoy</button>
           </div>
           <p className="muted small top-6">Zona horaria activa: UTC-6 (Ciudad de México).</p>
 

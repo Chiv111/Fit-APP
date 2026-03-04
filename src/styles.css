@@ -59,11 +59,7 @@ body {
 }
 
 .hero-tag {
-  margin: 0;
-  font-size: 10px;
-  letter-spacing: 0.1em;
-  color: #adb7c5;
-  font-family: "IBM Plex Mono", monospace;
+  display: none;
 }
 
 .hero h1 {
@@ -630,9 +626,27 @@ textarea.input {
 
 .gate-tag {
   margin: 0;
-  font-size: 10px;
+  font-size: 8px;
+  letter-spacing: 0.08em;
   font-family: "IBM Plex Mono", monospace;
-  color: #bac4d3;
+  color: #98a3b6;
+  opacity: 0.7;
+}
+
+.date-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.date-row-field {
+  min-width: 0;
+}
+
+.btn-date {
+  min-width: 76px;
+  white-space: nowrap;
 }
 
 .gate-card h1 {
@@ -668,4 +682,13 @@ textarea.input {
   .set-entry-row { grid-template-columns: 1fr 1fr auto auto; }
   .set-entry-row .btn { grid-column: auto; }
   .log-row { align-items: center; }
+}
+
+@media (max-width: 520px) {
+  .date-row {
+    grid-template-columns: 1fr;
+  }
+  .btn-date {
+    width: 100%;
+  }
 }

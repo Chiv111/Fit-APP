@@ -2090,11 +2090,17 @@ export default function App() {
             </div>
           </div>
 
-          <div className="date-row top-8">
-            <div className="date-row-field">
-              <Field label="Fecha" type="date" value={state.sessionDate} onChange={setSessionDate} />
+          <div className="field top-8">
+            <span>Fecha</span>
+            <div className="date-control-row">
+              <input
+                className="input date-input-main"
+                type="date"
+                value={state.sessionDate}
+                onChange={(event) => setSessionDate(event.target.value)}
+              />
+              <button className="btn btn-ghost btn-date-inline" type="button" onClick={() => setSessionDate(mexicoDate())}>Hoy</button>
             </div>
-            <button className="btn btn-ghost btn-date" type="button" onClick={() => setSessionDate(mexicoDate())}>Hoy</button>
           </div>
           <p className="muted small top-6">Zona horaria activa: UTC-6 (Ciudad de México).</p>
 

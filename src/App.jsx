@@ -576,7 +576,6 @@ function formatSessionDate(input) {
   const date = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
   return new Intl.DateTimeFormat("es-MX", {
     timeZone: APP_TIMEZONE,
-    year: "2-digit",
     month: "2-digit",
     day: "2-digit",
   }).format(date);
@@ -1133,7 +1132,7 @@ export default function App() {
     });
 
     setTab("rutina");
-    setRoutineSavedMessage(`Resumen cargado: ${session.dayName} ${session.date}`);
+    setRoutineSavedMessage(`Resumen cargado: ${session.dayName} ${formatSessionDate(session.date)}`);
   };
 
   const finalizeRoutine = () => {
@@ -1143,7 +1142,7 @@ export default function App() {
     syncDraftToTrainingLogs(sessionDraft);
 
     clearSessionDraft();
-    setRoutineSavedMessage(`Rutina guardada - ${selectedDay.fullDay} ${state.sessionDate}`);
+    setRoutineSavedMessage(`Rutina guardada - ${selectedDay.fullDay} ${formatSessionDate(state.sessionDate)}`);
     setActiveExerciseCard(selectedDay.exercises.length);
   };
 
@@ -1517,7 +1516,7 @@ export default function App() {
                   <article className="exercise-card">
                     <h4>Finalizar rutina</h4>
                     <p className="muted top-6">{selectedDay.fullDay} - {selectedDay.title}</p>
-                    <p className="muted top-6">Fecha: {state.sessionDate}</p>
+                    <p className="muted top-6">Fecha: {formatSessionDate(state.sessionDate)}</p>
                     <p className="muted top-6">Sets listos para guardar: {sessionSetCount}</p>
                     <button className="btn btn-primary top-10" type="button" onClick={finalizeRoutine}>Finalizar y guardar</button>
                     <p className="tiny-note">Borrador autosalvado en este iPhone mientras capturas. No se pierde si cierras Safari.</p>
@@ -1599,15 +1598,15 @@ export default function App() {
           <section className="stats-grid compact top-10 stats-mini">
             <StatCard label="Sesiones visibles" value={`${filteredRoutineSessions.length}`} meta="Filtradas" tone="accent" />
             <StatCard label="Sets totales" value={`${totalSetsLogged}`} meta="Acumulado" tone="good" />
-            <StatCard label="Última fecha" value={filteredRoutineSessions[0]?.date || "--"} meta={filteredRoutineSessions[0]?.dayName || "Sin registros"} tone="warning" />
-            <StatCard label="Fecha activa" value={state.sessionDate} meta={selectedDay.fullDay} tone="good" />
+            <StatCard label="Última fecha" value={formatSessionDate(filteredRoutineSessions[0]?.date || "")} meta={filteredRoutineSessions[0]?.dayName || "Sin registros"} tone="warning" />
+            <StatCard label="Fecha activa" value={formatSessionDate(state.sessionDate)} meta={selectedDay.fullDay} tone="good" />
           </section>
 
           {selectedHistorySession && (
             <article className="card top-12 history-summary">
               <div className="row space-between wrap">
                 <h4>Resumen del día</h4>
-                <span className="pill">{selectedHistorySession.date}</span>
+                <span className="pill">{formatSessionDate(selectedHistorySession.date)}</span>
               </div>
               <p className="muted small top-6">{selectedHistorySession.dateLabel}</p>
               <p className="muted top-6">{selectedHistorySession.dayName} - {selectedHistorySession.title}</p>
@@ -1657,7 +1656,7 @@ export default function App() {
               <article key={session.id} className={`card history-card ${selectedHistorySession?.id === session.id ? "selected" : ""}`}>
                 <div className="row space-between wrap">
                   <h4>{session.dayName}</h4>
-                  <span className="pill">{session.date}</span>
+                  <span className="pill">{formatSessionDate(session.date)}</span>
                 </div>
                 <p className="muted top-6">{session.title}</p>
                 <p className="muted small top-6">Sets guardados: {session.setsCount}</p>

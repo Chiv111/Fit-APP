@@ -1,4 +1,4 @@
-﻿const CACHE_NAME = "lockin-cache-v1";
+const CACHE_NAME = "lockin-cache-v2";
 const URLS = ["/", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png", "/icons/icon-180.png"];
 
 self.addEventListener("install", (event) => {
@@ -24,16 +24,37 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
 
-  event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) return cached;
-      return fetch(event.request)
+  const url = new URL(event.request.url);
+  if (url.origin !== self.location.origin) return;
+
+  // Network-first for HTML navigations avoids stale app shell after new deploys.
+  if (event.request.mode === "navigate") {
+    event.respondWith(
+      fetch(event.request)
         .then((response) => {
           const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          caches.open(CACHE_NAME).then((cache) => cache.put("/", clone));
           return response;
         })
-        .catch(() => caches.match("/"));
+        .catch(() => caches.match("/"))
+    );
+    return;
+  }
+
+  // Cache-first for static assets, but never fall back to "/" for JS/CSS.
+  event.respondWith(
+    caches.match(event.request).then((cached) => {
+      const network = fetch(event.request)
+        .then((response) => {
+          if (response && response.status === 200 && response.type === "basic") {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          }
+          return response;
+        })
+        .catch(() => cached || Response.error());
+
+      return cached || network;
     })
   );
 });

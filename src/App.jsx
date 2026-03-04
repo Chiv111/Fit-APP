@@ -576,10 +576,9 @@ function formatSessionDate(input) {
   const date = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
   return new Intl.DateTimeFormat("es-MX", {
     timeZone: APP_TIMEZONE,
-    weekday: "long",
-    year: "numeric",
-    month: "short",
-    day: "numeric",
+    year: "2-digit",
+    month: "2-digit",
+    day: "2-digit",
   }).format(date);
 }
 
@@ -1412,7 +1411,7 @@ export default function App() {
           </div>
 
           <div className="grid-two top-8">
-            <Field label="Fecha de entrenamiento" type="date" value={state.sessionDate} onChange={setSessionDate} />
+            <Field label="Fecha" type="date" value={state.sessionDate} onChange={setSessionDate} />
             <button className="btn btn-ghost" type="button" onClick={() => setSessionDate(mexicoDate())}>Usar hoy</button>
           </div>
           <p className="muted small top-6">Zona horaria activa: UTC-6 (Ciudad de México).</p>

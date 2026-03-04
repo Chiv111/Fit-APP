@@ -14,14 +14,20 @@ const MAX_BACKUPS = 40;
 const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL || "").trim();
 const SUPABASE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY || "").trim();
 const SUPABASE_PROFILE_KEY = (import.meta.env.VITE_SUPABASE_PROFILE_KEY || "sebastian-main").trim();
+const REQUIRE_SUPABASE_AUTH = String(import.meta.env.VITE_REQUIRE_SUPABASE_AUTH || "").trim().toLowerCase() === "true";
+const SUPABASE_AUTH_REDIRECT_URL = (import.meta.env.VITE_SUPABASE_AUTH_REDIRECT_URL || "").trim();
 const CLOUD_TABLE = "lockin_state";
+const CLOUD_AUTH_TABLE = "lockin_state_user";
 const CLOUD_SYNC_DEBOUNCE_MS = 1500;
+const SYNC_QUEUE_KEY = "lockin_sync_queue_v1";
+const SYNC_MAX_RETRIES = 8;
 const APP_TIMEZONE = "America/Mexico_City";
 
-const CLOUD_ENABLED = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY && SUPABASE_PROFILE_KEY);
+const SUPABASE_CONFIGURED = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
+const CLOUD_ENABLED = REQUIRE_SUPABASE_AUTH ? SUPABASE_CONFIGURED : Boolean(SUPABASE_URL && SUPABASE_ANON_KEY && SUPABASE_PROFILE_KEY);
 const supabase = CLOUD_ENABLED
   ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      auth: { persistSession: false, autoRefreshToken: false },
+      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
     })
   : null;
 
@@ -264,6 +270,21 @@ function safeSessionRemove(key) {
   } catch {
     return false;
   }
+}
+
+function loadSyncQueue() {
+  const parsed = parseJson(safeLocalGet(SYNC_QUEUE_KEY), null);
+  if (!parsed || typeof parsed !== "object") return { pending: null, retries: 0, lastError: null, updatedAt: null };
+  return {
+    pending: parsed.pending && typeof parsed.pending === "object" ? normalizeState(parsed.pending) : null,
+    retries: Number(parsed.retries) || 0,
+    lastError: parsed.lastError || null,
+    updatedAt: parsed.updatedAt || null,
+  };
+}
+
+function saveSyncQueue(queue) {
+  return safeLocalSet(SYNC_QUEUE_KEY, JSON.stringify(queue));
 }
 
 function makeId(prefix) {
@@ -515,13 +536,22 @@ function saveState(state, forceBackup = false) {
   };
 }
 
-async function fetchCloudState() {
+function resolveCloudTarget(identity) {
+  if (identity?.userId) {
+    return { table: CLOUD_AUTH_TABLE, key: "user_id", value: identity.userId };
+  }
+  return { table: CLOUD_TABLE, key: "profile_key", value: identity?.profileKey || SUPABASE_PROFILE_KEY };
+}
+
+async function fetchCloudState(identity) {
   if (!CLOUD_ENABLED || !supabase) return { ok: false, reason: "disabled", payload: null, cloudUpdatedAt: null };
+  const target = resolveCloudTarget(identity);
+  if (!target.value) return { ok: false, reason: "missing_identity", payload: null, cloudUpdatedAt: null };
 
   const { data, error } = await supabase
-    .from(CLOUD_TABLE)
+    .from(target.table)
     .select("payload,updated_at")
-    .eq("profile_key", SUPABASE_PROFILE_KEY)
+    .eq(target.key, target.value)
     .maybeSingle();
 
   if (error) return { ok: false, reason: error.message, payload: null, cloudUpdatedAt: null };
@@ -535,19 +565,20 @@ async function fetchCloudState() {
   };
 }
 
-async function pushCloudState(payload) {
+async function pushCloudState(payload, identity) {
   if (!CLOUD_ENABLED || !supabase) return { ok: false, reason: "disabled", cloudUpdatedAt: null };
+  const target = resolveCloudTarget(identity);
+  if (!target.value) return { ok: false, reason: "missing_identity", cloudUpdatedAt: null };
+
+  const row = {
+    payload,
+    updated_at: new Date().toISOString(),
+    [target.key]: target.value,
+  };
 
   const { data, error } = await supabase
-    .from(CLOUD_TABLE)
-    .upsert(
-      {
-        profile_key: SUPABASE_PROFILE_KEY,
-        payload,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "profile_key" }
-    )
+    .from(target.table)
+    .upsert(row, { onConflict: target.key })
     .select("updated_at")
     .single();
 
@@ -579,6 +610,31 @@ function formatSessionDate(input) {
     month: "2-digit",
     day: "2-digit",
   }).format(date);
+}
+
+function parseRestSeconds(raw) {
+  if (!raw || typeof raw !== "string") return 90;
+  const text = raw.toLowerCase();
+  const secMatch = text.match(/(\d+(?:\.\d+)?)\s*s/);
+  if (secMatch) return Math.max(15, Math.round(Number(secMatch[1])));
+  const minMatch = text.match(/(\d+(?:\.\d+)?)\s*min/);
+  if (minMatch) return Math.max(15, Math.round(Number(minMatch[1]) * 60));
+  const plainNumber = text.match(/(\d+(?:\.\d+)?)/);
+  if (plainNumber) {
+    const value = Number(plainNumber[1]);
+    if (!Number.isNaN(value)) return value <= 10 ? Math.round(value * 60) : Math.round(value);
+  }
+  return 90;
+}
+
+function getIsoWeekKey(dateString) {
+  const [year, month, day] = String(dateString).split("-").map(Number);
+  if (!year || !month || !day) return "0000-W00";
+  const date = new Date(Date.UTC(year, month - 1, day));
+  date.setUTCDate(date.getUTCDate() + 4 - (date.getUTCDay() || 7));
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil((((date - yearStart) / 86400000) + 1) / 7);
+  return `${date.getUTCFullYear()}-W${String(weekNo).padStart(2, "0")}`;
 }
 
 function getExerciseHistory(trainingLogs, dayId, exerciseId) {
@@ -621,7 +677,7 @@ function AccessGate({ onUnlock }) {
     <div className="gate-shell">
       <div className="gate-card">
         <p className="gate-tag">LOCK IN</p>
-        <h1>Acceso privado</h1>
+          <h1>Acceso privado</h1>
         <p className="gate-sub">Ingresa la clave para abrir tu panel.</p>
         <form onSubmit={onSubmit} className="stack gap-8">
           <input
@@ -638,12 +694,129 @@ function AccessGate({ onUnlock }) {
           {error && <p className="error-text">{error}</p>}
           <button className="btn btn-primary" type="submit">Entrar</button>
         </form>
-        <p className="tiny-note">
-          Clave desde <code>VITE_APP_ACCESS_KEY</code>
-          {USING_FALLBACK_KEY ? " (fallback activo)" : ""}.
-        </p>
+        <p className="tiny-note">Clave desde <code>VITE_APP_ACCESS_KEY</code>{USING_FALLBACK_KEY ? " (fallback activo)" : ""}.</p>
       </div>
     </div>
+  );
+}
+
+function SupabaseAuthGate({
+  configured,
+  email,
+  onEmailChange,
+  onSendOtp,
+  sendingOtp,
+  notice,
+  error,
+  fallbackEnabled,
+  onUnlockWithKey,
+}) {
+  const [keyValue, setKeyValue] = useState("");
+  const [keyError, setKeyError] = useState("");
+
+  const onKeySubmit = (event) => {
+    event.preventDefault();
+    if (keyValue.trim() === ACCESS_KEY) {
+      onUnlockWithKey();
+      return;
+    }
+    setKeyError("Clave invalida.");
+  };
+
+  return (
+    <div className="gate-shell">
+      <div className="gate-card">
+        <p className="gate-tag">LOCK IN AUTH</p>
+        <h1>Acceso con Supabase</h1>
+        {!configured && <p className="error-text">Configura VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY.</p>}
+        {configured && (
+          <>
+            <p className="gate-sub">Ingresa tu correo para recibir un link de acceso.</p>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                onSendOtp();
+              }}
+              className="stack gap-8"
+            >
+              <input
+                className="input"
+                type="email"
+                value={email}
+                onChange={(event) => onEmailChange(event.target.value)}
+                placeholder="correo@ejemplo.com"
+                autoComplete="email"
+                autoFocus
+              />
+              <button className="btn btn-primary" type="submit" disabled={sendingOtp}>
+                {sendingOtp ? "Enviando..." : "Enviar acceso por correo"}
+              </button>
+            </form>
+          </>
+        )}
+        {notice && <p className="tiny-note">{notice}</p>}
+        {error && <p className="error-text">{error}</p>}
+
+        {fallbackEnabled && (
+          <div className="top-12">
+            <p className="tiny-note">Fallback local habilitado con VITE_APP_ACCESS_KEY.</p>
+            <form onSubmit={onKeySubmit} className="stack gap-8">
+              <input
+                className="input"
+                type="password"
+                value={keyValue}
+                onChange={(event) => {
+                  setKeyValue(event.target.value);
+                  if (keyError) setKeyError("");
+                }}
+                placeholder="Clave fallback"
+              />
+              <button className="btn btn-ghost" type="submit">Entrar con clave local</button>
+              {keyError && <p className="error-text">{keyError}</p>}
+            </form>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MiniLineChart({ points, color = "#d83b2d", height = 120 }) {
+  const width = 320;
+  if (!Array.isArray(points) || points.length < 2) {
+    return (
+      <div className="chart-empty">
+        <p className="muted">Sin datos suficientes para grafica.</p>
+      </div>
+    );
+  }
+
+  const xs = points.map((item) => Number(item.x) || 0);
+  const ys = points.map((item) => Number(item.y) || 0);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const spanX = Math.max(1, maxX - minX);
+  const spanY = Math.max(1, maxY - minY);
+
+  const mapped = points.map((point) => {
+    const x = ((point.x - minX) / spanX) * (width - 20) + 10;
+    const y = height - (((point.y - minY) / spanY) * (height - 20) + 10);
+    return { x, y };
+  });
+
+  const linePath = mapped.map((item, index) => `${index === 0 ? "M" : "L"}${item.x.toFixed(2)} ${item.y.toFixed(2)}`).join(" ");
+  const areaPath = `${linePath} L ${mapped[mapped.length - 1].x.toFixed(2)} ${height - 8} L ${mapped[0].x.toFixed(2)} ${height - 8} Z`;
+
+  return (
+    <svg className="mini-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Grafica de progreso">
+      <path d={areaPath} fill={`${color}26`} />
+      <path d={linePath} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+      {mapped.map((item, index) => (
+        <circle key={`pt_${index}`} cx={item.x} cy={item.y} r="2.5" fill={color} />
+      ))}
+    </svg>
   );
 }
 
@@ -666,19 +839,31 @@ function Field({ label, value, onChange, type = "text", step, placeholder }) {
   );
 }
 
-function ExerciseLogCard({ exercise, previous, currentSets, onAddSet, onRemoveSet }) {
+function ExerciseLogCard({
+  exercise,
+  previous,
+  currentSets,
+  onAddSet,
+  onRemoveSet,
+  onStartRest,
+  onGoNext,
+  canGoNext,
+  quickMode,
+}) {
   const [weight, setWeight] = useState("");
   const [reps, setReps] = useState("");
   const latestCurrentSet = currentSets[currentSets.length - 1] || null;
   const hasPreviousSet = Boolean(previous?.last && Number(previous.last.weight) > 0 && Number(previous.last.reps) > 0);
   const hasLatestCurrentSet = Boolean(latestCurrentSet && Number(latestCurrentSet.weight) > 0 && Number(latestCurrentSet.reps) > 0);
 
-  const addSet = () => {
+  const commitSet = ({ startRest = false, moveNext = false } = {}) => {
     const parsedWeight = Number(weight);
     const parsedReps = Number(reps);
     if (Number.isNaN(parsedWeight) || parsedWeight <= 0) return;
     if (Number.isNaN(parsedReps) || parsedReps <= 0) return;
     onAddSet(exercise.id, { weight: parsedWeight, reps: parsedReps, ts: Date.now() });
+    if (startRest && onStartRest) onStartRest(exercise);
+    if (moveNext && canGoNext && onGoNext) onGoNext();
     setWeight("");
     setReps("");
   };
@@ -741,7 +926,12 @@ function ExerciseLogCard({ exercise, previous, currentSets, onAddSet, onRemoveSe
       <div className="set-entry-row">
         <input className="input" type="number" inputMode="decimal" placeholder="kg" step="0.5" value={weight} onChange={(event) => setWeight(event.target.value)} />
         <input className="input" type="number" inputMode="numeric" placeholder="reps" step="1" value={reps} onChange={(event) => setReps(event.target.value)} />
-        <button className="btn btn-primary" type="button" onClick={addSet}>Guardar</button>
+        <button className="btn btn-primary" type="button" onClick={() => commitSet({ startRest: quickMode })}>Guardar</button>
+        {quickMode && (
+          <button className="btn btn-soft" type="button" onClick={() => commitSet({ startRest: true, moveNext: true })} disabled={!canGoNext}>
+            Guardar + siguiente
+          </button>
+        )}
       </div>
     </article>
   );
@@ -750,26 +940,51 @@ function ExerciseLogCard({ exercise, previous, currentSets, onAddSet, onRemoveSe
 export default function App() {
   const [state, setState] = useState(() => loadState());
   const [draftLogs, setDraftLogs] = useState(() => loadDrafts());
+  const [authSession, setAuthSession] = useState(null);
+  const [authReady, setAuthReady] = useState(!REQUIRE_SUPABASE_AUTH);
+  const [authEmail, setAuthEmail] = useState("");
+  const [authNotice, setAuthNotice] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [sendingOtp, setSendingOtp] = useState(false);
   const [saveMeta, setSaveMeta] = useState({ ok: true, error: null, backupCount: 0, lastSavedAt: null, lastBackupAt: null });
   const [cloudMeta, setCloudMeta] = useState({
     enabled: CLOUD_ENABLED,
     syncedAt: null,
     syncing: false,
     error: null,
+    queueCount: 0,
+    retries: 0,
+    conflict: null,
   });
   const [cloudReady, setCloudReady] = useState(!CLOUD_ENABLED);
+  const [isOnline, setIsOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
   const cloudSyncTimerRef = useRef(null);
+  const cloudRetryTimerRef = useRef(null);
+  const pendingCloudPayloadRef = useRef(loadSyncQueue());
+  const knownCloudUpdatedAtRef = useRef(null);
+  const forceCloudOverwriteRef = useRef(false);
   const routineTrackRef = useRef(null);
   const [tab, setTab] = useState("rutina");
+  const [quickModeEnabled, setQuickModeEnabled] = useState(true);
   const [routineEditMode, setRoutineEditMode] = useState(false);
   const [activeExerciseCard, setActiveExerciseCard] = useState(0);
   const [routineSavedMessage, setRoutineSavedMessage] = useState("");
+  const [restTimer, setRestTimer] = useState({ endAt: null, seconds: 0, exercise: "" });
+  const [timerNow, setTimerNow] = useState(Date.now());
   const [dietEditMode, setDietEditMode] = useState(false);
   const [supplementEditMode, setSupplementEditMode] = useState(false);
   const [weightForm, setWeightForm] = useState({ date: mexicoDate(), weight: "", waist: "" });
   const [historyQuery, setHistoryQuery] = useState("");
   const [selectedHistorySessionId, setSelectedHistorySessionId] = useState("");
   const [isUnlocked, setIsUnlocked] = useState(() => safeSessionGet(SESSION_UNLOCK_KEY) === "1");
+  const cloudIdentity = useMemo(
+    () => ({
+      profileKey: SUPABASE_PROFILE_KEY,
+      userId: REQUIRE_SUPABASE_AUTH ? authSession?.user?.id || null : null,
+    }),
+    [authSession]
+  );
+  const cloudCanSync = CLOUD_ENABLED && (!REQUIRE_SUPABASE_AUTH || Boolean(cloudIdentity.userId));
 
   useEffect(() => {
     if (navigator.storage?.persist) {
@@ -780,16 +995,76 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
+    if (!REQUIRE_SUPABASE_AUTH || !supabase) {
+      setAuthReady(true);
+      return () => {};
+    }
 
-    if (!CLOUD_ENABLED) return () => {};
+    let mounted = true;
+    setAuthReady(false);
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (!mounted) return;
+      if (error) {
+        setAuthError(error.message || "No se pudo cargar la sesion.");
+      }
+      setAuthSession(data?.session || null);
+      setAuthReady(true);
+    });
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAuthSession(session || null);
+      if (session) {
+        setAuthError("");
+        setAuthNotice("Sesion activa.");
+      }
+    });
+
+    return () => {
+      mounted = false;
+      authListener?.subscription?.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    const onOnline = () => setIsOnline(true);
+    const onOffline = () => setIsOnline(false);
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
+    return () => {
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", onOffline);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!restTimer.endAt) return () => {};
+    const id = setInterval(() => setTimerNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [restTimer.endAt]);
+
+  useEffect(() => {
+    setSaveMeta(saveState(state));
+  }, [state]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!cloudCanSync) {
+      if (!CLOUD_ENABLED) setCloudReady(true);
+      setCloudMeta((prev) => ({ ...prev, enabled: cloudCanSync, syncing: false, error: null }));
+      return () => {};
+    }
 
     (async () => {
-      const cloud = await fetchCloudState();
+      const cloud = await fetchCloudState(cloudIdentity);
       if (cancelled) return;
 
       if (!cloud.ok) {
-        setCloudMeta({ enabled: true, syncedAt: null, syncing: false, error: cloud.reason || "Error de nube" });
+        setCloudMeta((prev) => ({
+          ...prev,
+          enabled: true,
+          syncing: false,
+          error: cloud.reason || "Error de nube",
+        }));
         setCloudReady(true);
         return;
       }
@@ -798,63 +1073,178 @@ export default function App() {
       const localUpdatedAt = Date.parse(localRaw?.updatedAt || "") || 0;
       const cloudUpdatedAt = Date.parse(cloud.cloudUpdatedAt || "") || 0;
 
+      knownCloudUpdatedAtRef.current = cloud.cloudUpdatedAt || null;
       if (cloud.payload && cloudUpdatedAt > localUpdatedAt) {
         setState(cloud.payload);
         setSaveMeta(saveState(cloud.payload));
       }
 
-      setCloudMeta({
+      setCloudMeta((prev) => ({
+        ...prev,
         enabled: true,
-        syncedAt: cloud.cloudUpdatedAt || null,
+        syncedAt: cloud.cloudUpdatedAt || prev.syncedAt,
         syncing: false,
         error: null,
-      });
+        queueCount: pendingCloudPayloadRef.current?.pending ? 1 : 0,
+        retries: pendingCloudPayloadRef.current?.retries || 0,
+      }));
       setCloudReady(true);
     })();
 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [cloudCanSync, cloudIdentity.profileKey, cloudIdentity.userId]);
 
   useEffect(() => {
-    setSaveMeta(saveState(state));
-  }, [state]);
+    if (!cloudCanSync || !cloudReady) return () => {};
+    const queue = {
+      pending: normalizeState(state),
+      retries: 0,
+      lastError: null,
+      updatedAt: new Date().toISOString(),
+    };
+    pendingCloudPayloadRef.current = queue;
+    saveSyncQueue(queue);
+    setCloudMeta((prev) => ({ ...prev, queueCount: 1, retries: 0, conflict: null }));
+    return () => {};
+  }, [state, cloudCanSync, cloudReady]);
 
   useEffect(() => {
-    if (!CLOUD_ENABLED || !cloudReady) return () => {};
+    if (!cloudCanSync || !cloudReady) return () => {};
 
-    if (cloudSyncTimerRef.current) clearTimeout(cloudSyncTimerRef.current);
-    setCloudMeta((prev) => ({ ...prev, syncing: true }));
+    const scheduleAttempt = (delayMs) => {
+      if (cloudSyncTimerRef.current) clearTimeout(cloudSyncTimerRef.current);
+      cloudSyncTimerRef.current = setTimeout(async () => {
+        const queue = pendingCloudPayloadRef.current;
+        if (!queue?.pending) {
+          setCloudMeta((prev) => ({ ...prev, syncing: false, queueCount: 0 }));
+          return;
+        }
+        if (!isOnline) {
+          setCloudMeta((prev) => ({
+            ...prev,
+            syncing: false,
+            error: "Sin internet. Pendiente en cola.",
+            queueCount: 1,
+          }));
+          if (cloudRetryTimerRef.current) clearTimeout(cloudRetryTimerRef.current);
+          cloudRetryTimerRef.current = setTimeout(() => scheduleAttempt(1500), 3000);
+          return;
+        }
 
-    cloudSyncTimerRef.current = setTimeout(async () => {
-      const payload = normalizeState(state);
-      const response = await pushCloudState(payload);
-      if (!response.ok) {
+        setCloudMeta((prev) => ({ ...prev, syncing: true, error: null }));
+        const remote = await fetchCloudState(cloudIdentity);
+        if (!remote.ok && remote.reason !== "missing_identity") {
+          const retries = Math.min((queue.retries || 0) + 1, SYNC_MAX_RETRIES);
+          const nextQueue = { ...queue, retries, lastError: remote.reason || "Error de lectura" };
+          pendingCloudPayloadRef.current = nextQueue;
+          saveSyncQueue(nextQueue);
+          const retryDelay = Math.min(30000, 1200 * (2 ** retries));
+          setCloudMeta((prev) => ({
+            ...prev,
+            syncing: false,
+            queueCount: 1,
+            retries,
+            error: `No se pudo leer nube. Reintento en ${Math.round(retryDelay / 1000)}s.`,
+          }));
+          if (cloudRetryTimerRef.current) clearTimeout(cloudRetryTimerRef.current);
+          cloudRetryTimerRef.current = setTimeout(() => scheduleAttempt(1000), retryDelay);
+          return;
+        }
+
+        const remoteUpdatedAt = Date.parse(remote.cloudUpdatedAt || "") || 0;
+        const knownUpdatedAt = Date.parse(knownCloudUpdatedAtRef.current || "") || 0;
+        const localUpdatedAt = Date.parse(queue.pending?.updatedAt || "") || 0;
+        const hasRemoteConflict = remoteUpdatedAt > knownUpdatedAt + 500 && remoteUpdatedAt > localUpdatedAt + 500;
+        if (hasRemoteConflict && !forceCloudOverwriteRef.current) {
+          setCloudMeta((prev) => ({
+            ...prev,
+            syncing: false,
+            conflict: {
+              remoteUpdatedAt: remote.cloudUpdatedAt,
+              localUpdatedAt: queue.pending?.updatedAt || null,
+            },
+            error: "Conflicto detectado: hay cambios mas nuevos en nube.",
+          }));
+          return;
+        }
+
+        const response = await pushCloudState(queue.pending, cloudIdentity);
+        if (!response.ok) {
+          const retries = Math.min((queue.retries || 0) + 1, SYNC_MAX_RETRIES);
+          const nextQueue = { ...queue, retries, lastError: response.reason || "Error de sincronizacion" };
+          pendingCloudPayloadRef.current = nextQueue;
+          saveSyncQueue(nextQueue);
+          const retryDelay = Math.min(30000, 1200 * (2 ** retries));
+          setCloudMeta((prev) => ({
+            ...prev,
+            syncing: false,
+            queueCount: 1,
+            retries,
+            error: `Sincronizacion fallida. Reintento en ${Math.round(retryDelay / 1000)}s.`,
+          }));
+          if (cloudRetryTimerRef.current) clearTimeout(cloudRetryTimerRef.current);
+          cloudRetryTimerRef.current = setTimeout(() => scheduleAttempt(1000), retryDelay);
+          return;
+        }
+
+        forceCloudOverwriteRef.current = false;
+        knownCloudUpdatedAtRef.current = response.cloudUpdatedAt || new Date().toISOString();
+        pendingCloudPayloadRef.current = { pending: null, retries: 0, lastError: null, updatedAt: null };
+        saveSyncQueue(pendingCloudPayloadRef.current);
         setCloudMeta((prev) => ({
           ...prev,
           syncing: false,
-          error: response.reason || "No se pudo sincronizar.",
+          syncedAt: response.cloudUpdatedAt || new Date().toISOString(),
+          error: null,
+          queueCount: 0,
+          retries: 0,
+          conflict: null,
         }));
-        return;
-      }
+      }, delayMs);
+    };
 
-      setCloudMeta((prev) => ({
-        ...prev,
-        syncing: false,
-        syncedAt: response.cloudUpdatedAt || new Date().toISOString(),
-        error: null,
-      }));
-    }, CLOUD_SYNC_DEBOUNCE_MS);
-
+    scheduleAttempt(CLOUD_SYNC_DEBOUNCE_MS);
     return () => {
       if (cloudSyncTimerRef.current) clearTimeout(cloudSyncTimerRef.current);
+      if (cloudRetryTimerRef.current) clearTimeout(cloudRetryTimerRef.current);
     };
-  }, [state, cloudReady]);
+  }, [cloudCanSync, cloudReady, cloudIdentity.profileKey, cloudIdentity.userId, isOnline, state]);
 
   useEffect(() => {
     saveDrafts(draftLogs);
   }, [draftLogs]);
+
+  const sendOtpLink = async () => {
+    if (!supabase) return;
+    const email = authEmail.trim().toLowerCase();
+    if (!email || !email.includes("@")) {
+      setAuthError("Ingresa un correo valido.");
+      return;
+    }
+
+    setSendingOtp(true);
+    setAuthError("");
+    setAuthNotice("");
+    const redirectTo = SUPABASE_AUTH_REDIRECT_URL || window.location.origin;
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: redirectTo },
+    });
+    setSendingOtp(false);
+    if (error) {
+      setAuthError(error.message || "No se pudo enviar el correo.");
+      return;
+    }
+    setAuthNotice("Correo enviado. Abre el link en este iPhone para entrar.");
+  };
+
+  const signOutAuth = async () => {
+    if (!supabase) return;
+    await supabase.auth.signOut();
+    setAuthNotice("Sesion cerrada.");
+  };
 
   const unlock = () => {
     safeSessionSet(SESSION_UNLOCK_KEY, "1");
@@ -862,6 +1252,9 @@ export default function App() {
   };
 
   const lock = () => {
+    if (REQUIRE_SUPABASE_AUTH && authSession?.user?.id) {
+      signOutAuth();
+    }
     safeSessionRemove(SESSION_UNLOCK_KEY);
     setIsUnlocked(false);
   };
@@ -973,6 +1366,33 @@ export default function App() {
     return filteredRoutineSessions.find((session) => session.id === selectedHistorySessionId) || filteredRoutineSessions[0];
   }, [filteredRoutineSessions, selectedHistorySessionId]);
 
+  const previousComparableSession = useMemo(() => {
+    if (!selectedHistorySession) return null;
+    return routineSessions
+      .filter((session) => session.dayId === selectedHistorySession.dayId && session.date < selectedHistorySession.date)
+      .sort((a, b) => b.date.localeCompare(a.date))[0] || null;
+  }, [routineSessions, selectedHistorySession]);
+
+  const comparisonRows = useMemo(() => {
+    if (!selectedHistorySession || !previousComparableSession) return [];
+    const previousMap = Object.fromEntries(previousComparableSession.exerciseRows.map((row) => [row.id, row]));
+    return selectedHistorySession.exerciseRows.map((row) => {
+      const prev = previousMap[row.id];
+      if (!prev) {
+        return { id: row.id, name: row.name, maxDelta: row.max, volumeDelta: row.volume, trend: "nuevo" };
+      }
+      const maxDelta = Number((row.max - prev.max).toFixed(1));
+      const volumeDelta = Math.round(row.volume - prev.volume);
+      return {
+        id: row.id,
+        name: row.name,
+        maxDelta,
+        volumeDelta,
+        trend: maxDelta > 0 || volumeDelta > 0 ? "sube" : maxDelta < 0 || volumeDelta < 0 ? "baja" : "igual",
+      };
+    });
+  }, [selectedHistorySession, previousComparableSession]);
+
   useEffect(() => {
     if (!filteredRoutineSessions.length) {
       if (selectedHistorySessionId) setSelectedHistorySessionId("");
@@ -983,14 +1403,56 @@ export default function App() {
     if (!exists) setSelectedHistorySessionId(filteredRoutineSessions[0].id);
   }, [filteredRoutineSessions, selectedHistorySessionId]);
 
+  const weightTrendPoints = useMemo(() => {
+    const rows = [...state.weightLogs].sort((a, b) => a.date.localeCompare(b.date));
+    return rows.map((entry, index) => ({ x: index + 1, y: Number(entry.weight) || 0 }));
+  }, [state.weightLogs]);
+
+  const weeklyVolumeRows = useMemo(() => {
+    const map = {};
+    routineSessions.forEach((session) => {
+      const weekKey = getIsoWeekKey(session.date);
+      if (!map[weekKey]) map[weekKey] = { weekKey, volume: 0, sets: 0 };
+      map[weekKey].volume += session.sessionVolume;
+      map[weekKey].sets += session.setsCount;
+    });
+    return Object.values(map)
+      .sort((a, b) => a.weekKey.localeCompare(b.weekKey))
+      .slice(-12);
+  }, [routineSessions]);
+
+  const weeklyVolumePoints = useMemo(
+    () => weeklyVolumeRows.map((row, index) => ({ x: index + 1, y: row.volume })),
+    [weeklyVolumeRows]
+  );
+
+  const exercisePbs = useMemo(() => {
+    const map = {};
+    routineSessions.forEach((session) => {
+      session.exerciseRows.forEach((row) => {
+        if (!map[row.id] || row.max > map[row.id].max) {
+          map[row.id] = { id: row.id, name: row.name, max: row.max, date: session.date };
+        }
+      });
+    });
+    return Object.values(map).sort((a, b) => b.max - a.max).slice(0, 8);
+  }, [routineSessions]);
+
   const deltaFromStart = latestWeight - Number(state.settings.startWeight || 0);
-  const saveStatusText = cloudMeta.enabled
-    ? cloudMeta.syncing
-      ? "Guardando en nube..."
-      : cloudMeta.error
-        ? "Guardado local"
-        : "Guardado local + nube"
-    : "Guardado local";
+  const restRemainingSec = restTimer.endAt ? Math.max(0, Math.ceil((restTimer.endAt - timerNow) / 1000)) : 0;
+  const saveStatusText = !cloudMeta.enabled
+    ? "Guardado local"
+    : cloudMeta.conflict
+      ? "Conflicto de nube"
+      : cloudMeta.syncing
+        ? "Sincronizando..."
+        : cloudMeta.queueCount > 0
+          ? isOnline
+            ? `En cola (${cloudMeta.retries || 0})`
+            : "En cola sin internet"
+          : cloudMeta.error
+            ? "Guardado local"
+            : "Guardado local + nube";
 
   const updateSetting = (field, value) => {
     setState((prev) => ({ ...prev, settings: { ...prev.settings, [field]: value } }));
@@ -1019,6 +1481,13 @@ export default function App() {
     setRoutineSavedMessage("");
     if (routineTrackRef.current) routineTrackRef.current.scrollLeft = 0;
   }, [selectedDay.id, selectedDay.exercises.length, state.sessionDate]);
+
+  useEffect(() => {
+    if (!restTimer.endAt) return;
+    if (restRemainingSec <= 0) {
+      setRestTimer({ endAt: null, seconds: 0, exercise: "" });
+    }
+  }, [restRemainingSec, restTimer.endAt]);
 
   const buildBaseDraft = () => {
     const base = {};
@@ -1083,6 +1552,19 @@ export default function App() {
     if (routineSavedMessage) setRoutineSavedMessage("");
   };
 
+  const startRestTimerFromExercise = (exercise) => {
+    const seconds = parseRestSeconds(exercise?.rest || "");
+    setRestTimer({
+      endAt: Date.now() + (seconds * 1000),
+      seconds,
+      exercise: exercise?.name || "Ejercicio",
+    });
+  };
+
+  const clearRestTimer = () => {
+    setRestTimer({ endAt: null, seconds: 0, exercise: "" });
+  };
+
   const removeSetDraft = (exerciseId, index) => {
     updateSessionDraft((currentDraft) => {
       const sets = [...(Array.isArray(currentDraft?.[exerciseId]) ? currentDraft[exerciseId] : [])];
@@ -1117,6 +1599,37 @@ export default function App() {
     setActiveExerciseCard(nextIndex);
   };
 
+  const autofillSessionFromPrevious = () => {
+    let appliedCount = 0;
+    updateSessionDraft((currentDraft) => {
+      const nextDraft = { ...currentDraft };
+
+      selectedDay.exercises.forEach((exercise) => {
+        const alreadyHasSets = Array.isArray(nextDraft[exercise.id]) && nextDraft[exercise.id].length > 0;
+        if (alreadyHasSets) return;
+
+        const history = getExerciseHistory(state.trainingLogs, selectedDay.id, exercise.id);
+        const previous = history.find((entry) => entry.date < state.sessionDate) || history.find((entry) => entry.date !== state.sessionDate) || null;
+        if (!previous?.last) return;
+
+        nextDraft[exercise.id] = [{
+          weight: Number(previous.last.weight) || 0,
+          reps: Number(previous.last.reps) || 0,
+          ts: Date.now(),
+        }];
+        appliedCount += 1;
+      });
+
+      syncDraftToTrainingLogs(nextDraft);
+      return nextDraft;
+    });
+    if (appliedCount > 0) {
+      setRoutineSavedMessage(`Modo rapido: ${appliedCount} ejercicios autocompletados.`);
+    } else {
+      setRoutineSavedMessage("Modo rapido: no habia datos previos para autocompletar.");
+    }
+  };
+
   const openHistorySession = (session) => {
     if (!session) return;
     setSelectedHistorySessionId(session.id);
@@ -1133,6 +1646,21 @@ export default function App() {
 
     setTab("rutina");
     setRoutineSavedMessage(`Resumen cargado: ${session.dayName} ${formatSessionDate(session.date)}`);
+  };
+
+  const useCloudVersion = async () => {
+    const remote = await fetchCloudState(cloudIdentity);
+    if (!remote.ok || !remote.payload) return;
+    setState(remote.payload);
+    setSaveMeta(saveState(remote.payload, true));
+    knownCloudUpdatedAtRef.current = remote.cloudUpdatedAt || knownCloudUpdatedAtRef.current;
+    setCloudMeta((prev) => ({ ...prev, conflict: null, error: null, syncedAt: remote.cloudUpdatedAt || prev.syncedAt }));
+  };
+
+  const overwriteCloudVersion = () => {
+    forceCloudOverwriteRef.current = true;
+    setCloudMeta((prev) => ({ ...prev, conflict: null, error: null }));
+    setState((prev) => ({ ...prev }));
   };
 
   const finalizeRoutine = () => {
@@ -1318,6 +1846,122 @@ export default function App() {
     }));
   };
 
+  const exportProgressCsv = () => {
+    const header = [
+      ["tipo", "fecha", "bloque", "ejercicio", "sets", "max_kg", "prom_kg", "ultimo_kg", "ultimo_reps", "volumen"],
+    ];
+    const weightRows = state.weightLogs
+      .map((entry) => [
+        "peso",
+        entry.date,
+        "",
+        "",
+        "",
+        "",
+        "",
+        Number(entry.weight) || 0,
+        entry.waist ?? "",
+        "",
+      ]);
+    const routineRows = routineSessions.flatMap((session) =>
+      session.exerciseRows.map((item) => [
+        "rutina",
+        session.date,
+        `${session.dayName} - ${session.title}`,
+        item.name,
+        item.setsCount,
+        item.max,
+        item.avg,
+        item.last.weight,
+        item.last.reps,
+        item.volume,
+      ])
+    );
+    const rows = [...header, ...weightRows, ...routineRows];
+    const csv = rows
+      .map((row) => row.map((value) => `"${String(value ?? "").replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `lockin-progreso-${mexicoDate()}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const exportPrintableReport = () => {
+    const reportWindow = window.open("", "_blank", "noopener,noreferrer,width=960,height=720");
+    if (!reportWindow) {
+      window.alert("No se pudo abrir la ventana de impresion.");
+      return;
+    }
+
+    const rows = routineSessions
+      .slice(0, 25)
+      .map(
+        (session) => `
+          <tr>
+            <td>${session.date}</td>
+            <td>${session.dayName}</td>
+            <td>${session.title}</td>
+            <td>${session.setsCount}</td>
+            <td>${session.sessionVolume}</td>
+          </tr>
+        `
+      )
+      .join("");
+    const pbs = exercisePbs
+      .map((item) => `<li>${item.name}: <strong>${item.max}kg</strong> (${item.date})</li>`)
+      .join("");
+
+    reportWindow.document.open();
+    reportWindow.document.write(`
+      <!doctype html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>LOCK IN - Reporte</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 24px; color: #111; }
+            h1, h2 { margin: 0 0 10px; }
+            .muted { color: #555; margin-bottom: 14px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+            th, td { border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 12px; }
+            th { background: #f2f2f2; }
+            ul { margin: 8px 0 0 18px; }
+          </style>
+        </head>
+        <body>
+          <h1>LOCK IN - Reporte de progreso</h1>
+          <p class="muted">Generado ${formatDate(new Date().toISOString())}</p>
+          <h2>Peso actual: ${latestWeight.toFixed(1)}kg</h2>
+          <p class="muted">Meta: ${state.settings.goalWeight}kg | Cambio: ${deltaFromStart > 0 ? "+" : ""}${deltaFromStart.toFixed(1)}kg</p>
+          <h2>PRs por ejercicio</h2>
+          <ul>${pbs || "<li>Sin registros.</li>"}</ul>
+          <h2>Ultimas sesiones</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Dia</th>
+                <th>Bloque</th>
+                <th>Sets</th>
+                <th>Volumen</th>
+              </tr>
+            </thead>
+            <tbody>${rows || "<tr><td colspan='5'>Sin sesiones guardadas.</td></tr>"}</tbody>
+          </table>
+        </body>
+      </html>
+    `);
+    reportWindow.document.close();
+    reportWindow.focus();
+    reportWindow.print();
+  };
+
   const exportBackup = () => {
     const payload = { exportedAt: new Date().toISOString(), app: "LOCK IN", state };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
@@ -1357,20 +2001,56 @@ export default function App() {
     setState(normalizeState(DEFAULT_STATE));
   };
 
-  if (!isUnlocked) return <AccessGate onUnlock={unlock} />;
+  const hasSupabaseSession = Boolean(authSession?.user?.id);
+  const appUnlocked = REQUIRE_SUPABASE_AUTH ? hasSupabaseSession || isUnlocked : isUnlocked;
+
+  if (REQUIRE_SUPABASE_AUTH && !authReady) {
+    return (
+      <div className="gate-shell">
+        <div className="gate-card">
+          <p className="gate-tag">LOCK IN AUTH</p>
+          <h1>Cargando sesion...</h1>
+          <p className="gate-sub">Espera un momento.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!appUnlocked) {
+    if (REQUIRE_SUPABASE_AUTH) {
+      return (
+        <SupabaseAuthGate
+          configured={SUPABASE_CONFIGURED}
+          email={authEmail}
+          onEmailChange={setAuthEmail}
+          onSendOtp={sendOtpLink}
+          sendingOtp={sendingOtp}
+          notice={authNotice}
+          error={authError}
+          fallbackEnabled={Boolean(ACCESS_KEY)}
+          onUnlockWithKey={unlock}
+        />
+      );
+    }
+    return <AccessGate onUnlock={unlock} />;
+  }
 
   return (
     <div className="app-shell">
       <header className="hero">
         <div>
-          <p className="hero-tag">LOCK IN - PRIVATE MODE</p>
+          <p className="hero-tag">
+            {REQUIRE_SUPABASE_AUTH ? "LOCK IN - SUPABASE AUTH" : "LOCK IN - PRIVATE MODE"}
+          </p>
           <h1>{state.settings.appName}</h1>
           <p className="hero-sub">
             {state.settings.profileName} - {latestWeight.toFixed(1)}kg actual - Meta {state.settings.goalWeight}kg
           </p>
           <p className="hero-sync">{saveStatusText}</p>
         </div>
-        <button className="btn btn-ghost" type="button" onClick={lock}>Bloquear</button>
+        <button className="btn btn-ghost" type="button" onClick={lock}>
+          {REQUIRE_SUPABASE_AUTH ? "Salir" : "Bloquear"}
+        </button>
       </header>
 
       <section className="kpi-strip">
@@ -1393,7 +2073,7 @@ export default function App() {
       </section>
 
       <nav className="tabs">
-        {[ ["rutina", "Hoy"], ["historial", "Rutinas"], ["progreso", "Peso"], ["dieta", "Dieta"], ["suplementos", "Suples"], ["config", "Ajustes"] ].map(([id, label]) => (
+        {[ ["rutina", "Hoy"], ["historial", "Rutinas"], ["progreso", "Progreso"], ["dieta", "Dieta"], ["suplementos", "Suples"], ["config", "Ajustes"] ].map(([id, label]) => (
           <button key={id} type="button" className={`tab ${tab === id ? "active" : ""}`} onClick={() => setTab(id)}>{label}</button>
         ))}
       </nav>
@@ -1442,15 +2122,37 @@ export default function App() {
 
           <div className="row space-between wrap">
             <p className="muted">Caminata diaria con el perro: ~30 min (no cuenta como Z2).</p>
-            <button className="btn btn-ghost" type="button" onClick={() => setRoutineEditMode((prev) => !prev)}>
-              {routineEditMode ? "Cerrar edición" : "Editar rutina"}
-            </button>
+            <div className="row gap-8 wrap">
+              <button className={`btn ${quickModeEnabled ? "btn-primary" : "btn-ghost"}`} type="button" onClick={() => setQuickModeEnabled((prev) => !prev)}>
+                {quickModeEnabled ? "Modo rapido ON" : "Modo rapido OFF"}
+              </button>
+              <button className="btn btn-soft" type="button" onClick={autofillSessionFromPrevious}>Autocompletar</button>
+              <button className="btn btn-ghost" type="button" onClick={() => setRoutineEditMode((prev) => !prev)}>
+                {routineEditMode ? "Cerrar edicion" : "Editar rutina"}
+              </button>
+            </div>
           </div>
 
           {!routineEditMode && selectedDay.exercises.length > 0 && (
             <div className="top-10">
-              <p className="muted small">Desliza horizontalmente para capturar cada ejercicio. La última tarjeta finaliza y guarda todo.</p>
+              <p className="muted small">Desliza horizontalmente para capturar cada ejercicio. La ultima tarjeta finaliza y guarda todo.</p>
               {routineSavedMessage && <p className="trend top-6">{routineSavedMessage}</p>}
+
+              {quickModeEnabled && (
+                <article className="card top-8 rest-timer-card">
+                  <div className="row space-between wrap">
+                    <h4>Timer de descanso</h4>
+                    <span className="pill">{restRemainingSec > 0 ? `${restRemainingSec}s` : "--"}</span>
+                  </div>
+                  <p className="muted top-6">
+                    {restRemainingSec > 0 ? `${restTimer.exercise || "Ejercicio"} - descanso activo` : "Inactivo. Se inicia al guardar un set."}
+                  </p>
+                  <div className="row gap-8 wrap top-8">
+                    <button className="btn btn-soft btn-mini" type="button" onClick={() => setRestTimer({ endAt: Date.now() + 60000, seconds: 60, exercise: "Manual 60s" })}>+60s</button>
+                    <button className="btn btn-danger btn-mini" type="button" onClick={clearRestTimer} disabled={restRemainingSec <= 0}>Detener</button>
+                  </div>
+                </article>
+              )}
 
               <div className="swipe-progress top-8">
                 {Array.from({ length: totalRoutineCards }).map((_, index) => (
@@ -1494,7 +2196,7 @@ export default function App() {
                 className="swipe-track top-8"
                 onScroll={onRoutineTrackScroll}
               >
-                {selectedDay.exercises.map((exercise) => {
+                {selectedDay.exercises.map((exercise, exerciseIndex) => {
                   const history = getExerciseHistory(state.trainingLogs, selectedDay.id, exercise.id);
                   const previous = history.find((entry) => entry.date < state.sessionDate) || history.find((entry) => entry.date !== state.sessionDate) || null;
                   const currentSets = Array.isArray(sessionDraft?.[exercise.id]) ? sessionDraft[exercise.id] : [];
@@ -1507,6 +2209,10 @@ export default function App() {
                         currentSets={currentSets}
                         onAddSet={addSetDraft}
                         onRemoveSet={removeSetDraft}
+                        onStartRest={startRestTimerFromExercise}
+                        onGoNext={() => goToRoutineCard(exerciseIndex + 1)}
+                        canGoNext={exerciseIndex < selectedDay.exercises.length - 1}
+                        quickMode={quickModeEnabled}
                       />
                     </div>
                   );
@@ -1623,6 +2329,32 @@ export default function App() {
                 />
               </section>
 
+              {previousComparableSession && (
+                <article className="card top-10 compare-card">
+                  <div className="row space-between wrap">
+                    <h5>Comparativa vs sesion anterior</h5>
+                    <span className="pill">{formatSessionDate(previousComparableSession.date)}</span>
+                  </div>
+                  <p className="muted small top-6">
+                    Delta sets: {selectedHistorySession.setsCount - previousComparableSession.setsCount >= 0 ? "+" : ""}
+                    {selectedHistorySession.setsCount - previousComparableSession.setsCount}
+                    {" | "}
+                    Delta volumen: {selectedHistorySession.sessionVolume - previousComparableSession.sessionVolume >= 0 ? "+" : ""}
+                    {selectedHistorySession.sessionVolume - previousComparableSession.sessionVolume}kg
+                  </p>
+                  <div className="stack gap-8 top-8">
+                    {comparisonRows.map((item) => (
+                      <div key={`cmp_${item.id}`} className="dish-card">
+                        <strong>{item.name}</strong>
+                        <p className="muted small top-6">
+                          Max {item.maxDelta >= 0 ? "+" : ""}{item.maxDelta}kg | Volumen {item.volumeDelta >= 0 ? "+" : ""}{item.volumeDelta}kg
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </article>
+              )}
+
               <div className="stack gap-8 top-10">
                 {selectedHistorySession.exerciseRows.map((item) => (
                   <div key={`resume_${selectedHistorySession.id}_${item.id}`} className="dish-card">
@@ -1676,20 +2408,68 @@ export default function App() {
         </section>
       )}
 
-      {tab === "progreso" && (
+            {tab === "progreso" && (
         <section className="panel">
-          <h2>Peso corporal</h2>
+          <h2>Progreso Pro</h2>
           <div className="grid-three top-8">
             <Field label="Fecha" type="date" value={weightForm.date} onChange={(value) => setWeightForm((prev) => ({ ...prev, date: value }))} />
             <Field label="Peso (kg)" type="number" step="0.1" value={weightForm.weight} onChange={(value) => setWeightForm((prev) => ({ ...prev, weight: value }))} placeholder="78.3" />
             <Field label="Cintura (cm)" type="number" step="0.1" value={weightForm.waist} onChange={(value) => setWeightForm((prev) => ({ ...prev, waist: value }))} placeholder="Opcional" />
           </div>
-          <p className="muted small top-6">Las fechas se calculan en horario de Ciudad de México (UTC-6).</p>
-          <button className="btn btn-primary top-8" type="button" onClick={addWeightLog}>Guardar peso</button>
+          <p className="muted small top-6">Las fechas se calculan en horario de Ciudad de Mexico (UTC-6).</p>
+          <div className="row gap-8 wrap top-8">
+            <button className="btn btn-primary" type="button" onClick={addWeightLog}>Guardar peso</button>
+            <button className="btn btn-soft" type="button" onClick={exportProgressCsv}>Exportar CSV</button>
+            <button className="btn btn-ghost" type="button" onClick={exportPrintableReport}>Imprimir / PDF</button>
+          </div>
+
+          <section className="stats-grid compact top-10 stats-mini">
+            <StatCard label="Peso actual" value={`${latestWeight.toFixed(1)}kg`} meta="Registro mas reciente" tone="accent" />
+            <StatCard label="Cambio total" value={`${deltaFromStart >= 0 ? "+" : ""}${deltaFromStart.toFixed(1)}kg`} meta="Desde inicio" tone={deltaFromStart <= 0 ? "good" : "warning"} />
+            <StatCard label="Semanas con volumen" value={`${weeklyVolumeRows.length}`} meta="Ultimas 12 semanas" tone="warning" />
+            <StatCard label="PRs detectados" value={`${exercisePbs.length}`} meta="Ejercicios" tone="good" />
+          </section>
+
+          <article className="card top-12">
+            <h4>Tendencia de peso</h4>
+            <p className="muted small top-6">Cada punto es un registro de peso corporal.</p>
+            <MiniLineChart points={weightTrendPoints} color="#d83b2d" />
+          </article>
+
+          <article className="card top-12">
+            <h4>Volumen semanal</h4>
+            <p className="muted small top-6">Carga total (peso x reps) por semana.</p>
+            <MiniLineChart points={weeklyVolumePoints} color="#35c26c" />
+            <div className="stack gap-8 top-8">
+              {weeklyVolumeRows.slice(-4).reverse().map((row) => (
+                <div key={row.weekKey} className="log-row">
+                  <div>
+                    <strong>{row.weekKey}</strong>
+                    <p className="muted small">Volumen {row.volume}kg - Sets {row.sets}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </article>
+
+          <article className="card top-12">
+            <h4>PRs por ejercicio</h4>
+            {exercisePbs.length === 0 && <p className="muted top-8">Aun no hay PRs detectados.</p>}
+            <div className="stack gap-8 top-8">
+              {exercisePbs.map((item) => (
+                <div key={item.id} className="log-row">
+                  <div>
+                    <strong>{item.name}</strong>
+                    <p className="muted small">PR {item.max}kg - {formatSessionDate(item.date)}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </article>
 
           <article className="card top-12">
             <h4>Historial de peso corporal</h4>
-            {sortedWeightLogs.length === 0 && <p className="muted top-8">Aún no hay registros.</p>}
+            {sortedWeightLogs.length === 0 && <p className="muted top-8">Aun no hay registros.</p>}
             <div className="stack gap-8 top-8">
               {sortedWeightLogs.map((entry) => (
                 <div key={entry.id} className="log-row">
@@ -1701,11 +2481,6 @@ export default function App() {
                 </div>
               ))}
             </div>
-          </article>
-
-          <article className="card top-12">
-            <h4>Rutinas guardadas</h4>
-            <p className="muted top-6">Ve a la pestaña Historial para revisar cada rutina por fecha y ejercicio.</p>
           </article>
         </section>
       )}
@@ -1862,22 +2637,37 @@ export default function App() {
           </article>
 
           <article className="card top-12">
-            <h4>Protección de progreso</h4>
+            <h4>Proteccion de progreso</h4>
             <ul className="clean-list">
-              <li>Zona horaria: UTC-6 (Ciudad de México)</li>
-              <li>Guardado automático: {saveMeta.lastSavedAt ? formatDate(saveMeta.lastSavedAt) : "--"}</li>
+              <li>Zona horaria: UTC-6 (Ciudad de Mexico)</li>
+              <li>Guardado automatico: {saveMeta.lastSavedAt ? formatDate(saveMeta.lastSavedAt) : "--"}</li>
               <li>Backups locales: {saveMeta.backupCount}</li>
-              <li>Último checkpoint: {saveMeta.lastBackupAt ? formatDate(new Date(saveMeta.lastBackupAt).toISOString()) : "--"}</li>
+              <li>Ultimo checkpoint: {saveMeta.lastBackupAt ? formatDate(new Date(saveMeta.lastBackupAt).toISOString()) : "--"}</li>
               <li>Registros por fecha: activos por cada bloque/ejercicio</li>
+              <li>Modo auth: {REQUIRE_SUPABASE_AUTH ? "Supabase OTP" : "Clave local"}</li>
               <li>Clave env: {USING_FALLBACK_KEY ? "fallback activa" : "configurada"}</li>
-              <li>Nube Supabase: {!CLOUD_ENABLED ? "No configurada" : cloudMeta.syncing ? "Sincronizando..." : cloudMeta.error ? "Error" : "Activa"}</li>
-              {CLOUD_ENABLED && <li>Última sincronización: {cloudMeta.syncedAt ? formatDate(cloudMeta.syncedAt) : "--"}</li>}
+              <li>Nube Supabase: {!CLOUD_ENABLED ? "No configurada" : cloudMeta.syncing ? "Sincronizando..." : cloudMeta.error ? "Con incidencias" : "Activa"}</li>
+              {CLOUD_ENABLED && <li>Ultima sincronizacion: {cloudMeta.syncedAt ? formatDate(cloudMeta.syncedAt) : "--"}</li>}
+              {CLOUD_ENABLED && <li>Cola pendiente: {cloudMeta.queueCount || 0}</li>}
+              {CLOUD_ENABLED && <li>Reintentos: {cloudMeta.retries || 0}</li>}
+              {REQUIRE_SUPABASE_AUTH && hasSupabaseSession && <li>Usuario: {authSession?.user?.email || authSession?.user?.id}</li>}
             </ul>
             {saveMeta.error && <p className="error-text">{saveMeta.error}</p>}
             {cloudMeta.error && <p className="error-text">{cloudMeta.error}</p>}
+            {cloudMeta.conflict && (
+              <div className="stack gap-8 top-8">
+                <p className="error-text">Conflicto: la nube tiene cambios mas recientes.</p>
+                <div className="row gap-8 wrap">
+                  <button className="btn btn-soft" type="button" onClick={useCloudVersion}>Usar version nube</button>
+                  <button className="btn btn-danger" type="button" onClick={overwriteCloudVersion}>Sobrescribir nube con local</button>
+                </div>
+              </div>
+            )}
             <div className="row gap-8 wrap top-10">
               <button className="btn btn-primary" type="button" onClick={checkpoint}>Crear checkpoint</button>
               <button className="btn btn-ghost" type="button" onClick={exportBackup}>Exportar backup</button>
+              <button className="btn btn-soft" type="button" onClick={exportProgressCsv}>Exportar progreso CSV</button>
+              <button className="btn btn-soft" type="button" onClick={exportPrintableReport}>Imprimir / PDF</button>
               <label className="btn btn-ghost file-label">
                 Importar backup
                 <input type="file" accept="application/json" onChange={importBackup} />
@@ -1900,3 +2690,4 @@ export default function App() {
     </div>
   );
 }
+

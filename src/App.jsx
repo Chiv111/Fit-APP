@@ -146,7 +146,7 @@ const DEFAULT_ROUTINE = [
     fullDay: "Domingo",
     type: "Cardio Z2",
     title: "Carrera libre 30-35 min",
-    postCardio: "Dia de cardio",
+    postCardio: "Día de cardio",
     cardioProtocol: "Ritmo 5:00-5:30 min/km. FC 130-150 LPM. RPE 4-5. Si no puedes hablar, baja ritmo.",
     exercises: [],
   },
@@ -157,7 +157,7 @@ const DEFAULT_DIET_MEALS = [
     id: "m_des",
     title: "Desayuno",
     time: "8:00-10:00am",
-    note: "Proteina alta + carbos para energia.",
+    note: "Proteína alta + carbos para energía.",
     options: [
       { id: "des_a", name: "Opcion A - Clasica", kcal: 844, protein: 49, carbs: 79, fats: 39, description: "Huevos + claras + aceite + avena + tortillas + verduras + cafe con leche." },
       { id: "des_b", name: "Opcion B - Licuado + huevos", kcal: 790, protein: 42, carbs: 80, fats: 35, description: "Leche + avena + platano + crema cacahuate + huevos cocidos." },
@@ -400,7 +400,7 @@ function normalizeState(candidate) {
     routine: routine.map((day, dayIndex) => ({
       id: day.id || makeId(`day${dayIndex}`),
       shortDay: day.shortDay || `D${dayIndex + 1}`,
-      fullDay: day.fullDay || `Dia ${dayIndex + 1}`,
+      fullDay: day.fullDay || `Día ${dayIndex + 1}`,
       type: day.type || "Fuerza",
       title: day.title || "Sesion",
       postCardio: day.postCardio || "",
@@ -657,6 +657,9 @@ function Field({ label, value, onChange, type = "text", step, placeholder }) {
 function ExerciseLogCard({ exercise, previous, currentSets, onAddSet, onRemoveSet }) {
   const [weight, setWeight] = useState("");
   const [reps, setReps] = useState("");
+  const latestCurrentSet = currentSets[currentSets.length - 1] || null;
+  const hasPreviousSet = Boolean(previous?.last && Number(previous.last.weight) > 0 && Number(previous.last.reps) > 0);
+  const hasLatestCurrentSet = Boolean(latestCurrentSet && Number(latestCurrentSet.weight) > 0 && Number(latestCurrentSet.reps) > 0);
 
   const addSet = () => {
     const parsedWeight = Number(weight);
@@ -666,6 +669,18 @@ function ExerciseLogCard({ exercise, previous, currentSets, onAddSet, onRemoveSe
     onAddSet(exercise.id, { weight: parsedWeight, reps: parsedReps, ts: Date.now() });
     setWeight("");
     setReps("");
+  };
+
+  const usePreviousSet = () => {
+    if (!hasPreviousSet) return;
+    setWeight(String(previous.last.weight));
+    setReps(String(previous.last.reps));
+  };
+
+  const useLastCapturedSet = () => {
+    if (!hasLatestCurrentSet) return;
+    setWeight(String(latestCurrentSet.weight));
+    setReps(String(latestCurrentSet.reps));
   };
 
   return (
@@ -681,6 +696,19 @@ function ExerciseLogCard({ exercise, previous, currentSets, onAddSet, onRemoveSe
           Última vez ({previous.date}): {previous.last.weight}kg x {previous.last.reps} - max {previous.max}kg
         </p>
       )}
+
+      <div className="row gap-8 wrap top-8">
+        {hasPreviousSet && (
+          <button className="btn btn-soft btn-mini" type="button" onClick={usePreviousSet}>
+            Usar última carga
+          </button>
+        )}
+        {hasLatestCurrentSet && (
+          <button className="btn btn-soft btn-mini" type="button" onClick={useLastCapturedSet}>
+            Repetir set anterior
+          </button>
+        )}
+      </div>
 
       {currentSets.length > 0 && (
         <div className="set-list">
@@ -719,6 +747,7 @@ export default function App() {
   });
   const [cloudReady, setCloudReady] = useState(!CLOUD_ENABLED);
   const cloudSyncTimerRef = useRef(null);
+  const routineTrackRef = useRef(null);
   const [tab, setTab] = useState("rutina");
   const [routineEditMode, setRoutineEditMode] = useState(false);
   const [activeExerciseCard, setActiveExerciseCard] = useState(0);
@@ -827,6 +856,7 @@ export default function App() {
   const sessionDraftKey = makeDraftSessionKey(selectedDay.id, state.sessionDate);
   const sessionSavedLogs = state.trainingLogs?.[selectedDay.id]?.[state.sessionDate] || {};
   const totalRoutineCards = selectedDay.exercises.length + 1;
+  const atLastRoutineCard = activeExerciseCard >= totalRoutineCards - 1;
 
   const sessionDraft = useMemo(() => {
     const existing = draftLogs?.[sessionDraftKey];
@@ -930,6 +960,7 @@ export default function App() {
   useEffect(() => {
     setActiveExerciseCard(0);
     setRoutineSavedMessage("");
+    if (routineTrackRef.current) routineTrackRef.current.scrollLeft = 0;
   }, [selectedDay.id, selectedDay.exercises.length, state.sessionDate]);
 
   const buildBaseDraft = () => {
@@ -1016,9 +1047,22 @@ export default function App() {
     });
   };
 
+  const goToRoutineCard = (targetIndex) => {
+    const nextIndex = clamp(targetIndex, 0, totalRoutineCards - 1);
+    const track = routineTrackRef.current;
+    if (!track) {
+      setActiveExerciseCard(nextIndex);
+      return;
+    }
+
+    const left = track.clientWidth * nextIndex;
+    track.scrollTo({ left, behavior: "smooth" });
+    setActiveExerciseCard(nextIndex);
+  };
+
   const finalizeRoutine = () => {
     const hasSets = selectedDay.exercises.some((exercise) => Array.isArray(sessionDraft?.[exercise.id]) && sessionDraft[exercise.id].length > 0);
-    if (!hasSets && !window.confirm("No hay sets capturados. Guardar esta rutina vacia para la fecha seleccionada?")) return;
+    if (!hasSets && !window.confirm("No hay sets capturados. ¿Guardar esta rutina vacía para la fecha seleccionada?")) return;
 
     syncDraftToTrainingLogs(sessionDraft);
 
@@ -1330,16 +1374,51 @@ export default function App() {
 
           {!routineEditMode && selectedDay.exercises.length > 0 && (
             <div className="top-10">
-              <p className="muted small">Desliza horizontalmente para capturar cada ejercicio. La ultima card finaliza y guarda todo.</p>
+              <p className="muted small">Desliza horizontalmente para capturar cada ejercicio. La última tarjeta finaliza y guarda todo.</p>
               {routineSavedMessage && <p className="trend top-6">{routineSavedMessage}</p>}
 
               <div className="swipe-progress top-8">
                 {Array.from({ length: totalRoutineCards }).map((_, index) => (
-                  <span key={`dot_${index}`} className={`swipe-dot ${index === activeExerciseCard ? "active" : ""}`} />
+                  <button
+                    key={`dot_${index}`}
+                    type="button"
+                    className={`swipe-dot ${index === activeExerciseCard ? "active" : ""}`}
+                    onClick={() => goToRoutineCard(index)}
+                    aria-label={`Ir a tarjeta ${index + 1}`}
+                  />
                 ))}
               </div>
 
-              <div key={`swipe_${selectedDay.id}_${state.sessionDate}`} className="swipe-track top-8" onScroll={onRoutineTrackScroll}>
+              <div className="swipe-toolbar top-8">
+                <button
+                  className="btn btn-soft btn-mini"
+                  type="button"
+                  onClick={() => goToRoutineCard(activeExerciseCard - 1)}
+                  disabled={activeExerciseCard === 0}
+                >
+                  Anterior
+                </button>
+                <p className="swipe-index">
+                  Tarjeta {Math.min(activeExerciseCard + 1, totalRoutineCards)} de {totalRoutineCards}
+                </p>
+                <button
+                  className={`btn btn-mini ${atLastRoutineCard ? "btn-primary" : "btn-soft"}`}
+                  type="button"
+                  onClick={() => {
+                    if (atLastRoutineCard) finalizeRoutine();
+                    else goToRoutineCard(activeExerciseCard + 1);
+                  }}
+                >
+                  {atLastRoutineCard ? "Guardar" : "Siguiente"}
+                </button>
+              </div>
+
+              <div
+                ref={routineTrackRef}
+                key={`swipe_${selectedDay.id}_${state.sessionDate}`}
+                className="swipe-track top-8"
+                onScroll={onRoutineTrackScroll}
+              >
                 {selectedDay.exercises.map((exercise) => {
                   const history = getExerciseHistory(state.trainingLogs, selectedDay.id, exercise.id);
                   const previous = history.find((entry) => entry.date < state.sessionDate) || history.find((entry) => entry.date !== state.sessionDate) || null;
@@ -1374,7 +1453,7 @@ export default function App() {
 
           {!routineEditMode && selectedDay.exercises.length === 0 && (
             <article className="card top-10">
-              <p className="muted">Dia de cardio. Si quieres agregar ejercicios en este bloque, activa "Editar rutina".</p>
+              <p className="muted">Día de cardio. Si quieres agregar ejercicios en este bloque, activa "Editar rutina".</p>
             </article>
           )}
 
@@ -1384,9 +1463,9 @@ export default function App() {
                 <h4>Editar día</h4>
                 <div className="grid-two top-8">
                   <Field label="Etiqueta corta" value={selectedDay.shortDay} onChange={(value) => updateSelectedDay("shortDay", value)} />
-                  <Field label="Dia completo" value={selectedDay.fullDay} onChange={(value) => updateSelectedDay("fullDay", value)} />
+                  <Field label="Día completo" value={selectedDay.fullDay} onChange={(value) => updateSelectedDay("fullDay", value)} />
                   <Field label="Tipo" value={selectedDay.type} onChange={(value) => updateSelectedDay("type", value)} />
-                  <Field label="Titulo" value={selectedDay.title} onChange={(value) => updateSelectedDay("title", value)} />
+                  <Field label="Título" value={selectedDay.title} onChange={(value) => updateSelectedDay("title", value)} />
                   <Field label="Post-cardio" value={selectedDay.postCardio} onChange={(value) => updateSelectedDay("postCardio", value)} />
                 </div>
                 <label className="field top-8">
@@ -1512,7 +1591,7 @@ export default function App() {
 
           <div className="stats-grid compact top-10">
             <StatCard label="Calorías" value={`${state.settings.calories}`} meta="kcal/día" tone="accent" />
-            <StatCard label="Proteina" value={`${state.settings.protein}g`} meta="Objetivo" tone="good" />
+            <StatCard label="Proteína" value={`${state.settings.protein}g`} meta="Objetivo" tone="good" />
             <StatCard label="Carbos" value={`${state.settings.carbs}g`} meta="Objetivo" tone="warning" />
             <StatCard label="Grasas" value={`${state.settings.fats}g`} meta="Objetivo" tone="warning" />
           </div>
@@ -1525,7 +1604,7 @@ export default function App() {
                 {dietEditMode ? (
                   <>
                     <div className="grid-two">
-                      <Field label="Titulo" value={meal.title} onChange={(value) => updateMeal(meal.id, "title", value)} />
+                      <Field label="Título" value={meal.title} onChange={(value) => updateMeal(meal.id, "title", value)} />
                       <Field label="Horario" value={meal.time} onChange={(value) => updateMeal(meal.id, "time", value)} />
                     </div>
                     <label className="field top-8">
@@ -1554,7 +1633,7 @@ export default function App() {
                             <Field label="Fats" type="number" value={option.fats} onChange={(value) => updateDish(meal.id, option.id, "fats", value)} />
                           </div>
                           <label className="field top-6">
-                            <span>Descripcion</span>
+                            <span>Descripción</span>
                             <textarea className="input" rows={2} value={option.description} onChange={(event) => updateDish(meal.id, option.id, "description", event.target.value)} />
                           </label>
                           <button className="btn btn-danger top-6" type="button" onClick={() => removeDish(meal.id, option.id)}>Borrar platillo</button>
@@ -1640,8 +1719,8 @@ export default function App() {
               <Field label="Peso meta" type="number" step="0.1" value={state.settings.goalWeight} onChange={(value) => updateSettingNumber("goalWeight", value)} />
               <Field label="Ayuno" value={state.settings.fastingWindow} onChange={(value) => updateSetting("fastingWindow", value)} />
               <Field label="Horario gym" value={state.settings.trainingWindow} onChange={(value) => updateSetting("trainingWindow", value)} />
-              <Field label="Calorias" type="number" value={state.settings.calories} onChange={(value) => updateSettingNumber("calories", value)} />
-              <Field label="Proteina" type="number" value={state.settings.protein} onChange={(value) => updateSettingNumber("protein", value)} />
+              <Field label="Calorías" type="number" value={state.settings.calories} onChange={(value) => updateSettingNumber("calories", value)} />
+              <Field label="Proteína" type="number" value={state.settings.protein} onChange={(value) => updateSettingNumber("protein", value)} />
               <Field label="Carbos" type="number" value={state.settings.carbs} onChange={(value) => updateSettingNumber("carbs", value)} />
               <Field label="Grasas" type="number" value={state.settings.fats} onChange={(value) => updateSettingNumber("fats", value)} />
               <Field label="Cardio semanal (min)" type="number" value={state.settings.weeklyCardioMin} onChange={(value) => updateSettingNumber("weeklyCardioMin", value)} />

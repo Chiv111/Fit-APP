@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
+import { buildRecommendedRoutine, parseRoutineImport } from "./profileOnboarding.js";
 
 const SAVE_KEY = "lockin_state_v3";
 const BACKUP_KEY = "lockin_backups_v3";
@@ -7,7 +8,9 @@ const DRAFT_KEY = "lockin_routine_drafts_v1";
 const LEGACY_KEYS = ["lockin_state_v2", "lockin_state_v1", "fit_app_state_v6", "fit_app_state_v5"];
 const LEGACY_BACKUPS = ["lockin_backups_v2", "lockin_backups_v1", "fit_app_backups_v6", "fit_app_backups_v5"];
 const SESSION_UNLOCK_KEY = "lockin_unlocked";
-const ACCESS_KEY = (import.meta.env.VITE_APP_ACCESS_KEY || "fitapp-2026").trim();
+const PROFILE_LIBRARY_KEY = "lockin_profiles_v1";
+const SESSION_PROFILE_KEY = "lockin_profile_session_v1";
+const ACCESS_KEY = (import.meta.env.VITE_APP_ACCESS_KEY || "12345").trim();
 const USING_FALLBACK_KEY = !import.meta.env.VITE_APP_ACCESS_KEY;
 const AUTO_BACKUP_MS = 1000 * 60 * 60 * 6;
 const MAX_BACKUPS = 40;
@@ -22,6 +25,12 @@ const CLOUD_SYNC_DEBOUNCE_MS = 1500;
 const SYNC_QUEUE_KEY = "lockin_sync_queue_v1";
 const SYNC_MAX_RETRIES = 8;
 const APP_TIMEZONE = "America/Mexico_City";
+const APP_TABS = [
+  ["rutina", "Hoy"],
+  ["historial", "Rutinas"],
+  ["progreso", "Progreso"],
+  ["config", "Ajustes"],
+];
 
 const SUPABASE_CONFIGURED = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 const CLOUD_ENABLED = REQUIRE_SUPABASE_AUTH ? SUPABASE_CONFIGURED : Boolean(SUPABASE_URL && SUPABASE_ANON_KEY && SUPABASE_PROFILE_KEY);
@@ -158,64 +167,12 @@ const DEFAULT_ROUTINE = [
   },
 ];
 
-const DEFAULT_DIET_MEALS = [
-  {
-    id: "m_des",
-    title: "Desayuno",
-    time: "8:00-10:00am",
-    note: "Proteína alta + carbos para energía.",
-    options: [
-      { id: "des_a", name: "Opcion A - Clasica", kcal: 844, protein: 49, carbs: 79, fats: 39, description: "Huevos + claras + aceite + avena + tortillas + verduras + cafe con leche." },
-      { id: "des_b", name: "Opcion B - Licuado + huevos", kcal: 790, protein: 42, carbs: 80, fats: 35, description: "Leche + avena + platano + crema cacahuate + huevos cocidos." },
-      { id: "des_c", name: "Opcion C - Chilaquiles proteicos", kcal: 733, protein: 68, carbs: 59, fats: 25, description: "Pollo + tortillas al horno + 2 huevos + salsa + queso." },
-    ],
-  },
-  {
-    id: "m_pre",
-    title: "Pre-entreno",
-    time: "3:30-4:00pm",
-    note: "Energia para entrenar.",
-    options: [{ id: "pre_a", name: "Platano + requeson", kcal: 263, protein: 23, carbs: 32, fats: 5, description: "1 platano + 150g requeson." }],
-  },
-  {
-    id: "m_cena",
-    title: "Cena post-gym",
-    time: "7:00-8:00pm",
-    note: "Comida fuerte: proteína + carbos + verduras + grasa saludable.",
-    options: [
-      { id: "cen_a", name: "Pechuga + arroz", kcal: 1219, protein: 107, carbs: 108, fats: 38, description: "400g pollo + 300g arroz + verduras + aceite + medio aguacate." },
-      { id: "cen_b", name: "Arrachera + tortillas", kcal: 1340, protein: 95, carbs: 85, fats: 72, description: "300g arrachera + 2 huevos + 5 tortillas + verduras + aceite." },
-      { id: "cen_c", name: "Lomo cerdo + tortillas", kcal: 1177, protein: 102, carbs: 73, fats: 55, description: "350g lomo + 2 huevos + 4 tortillas + verduras + aceite." },
-    ],
-  },
-  {
-    id: "m_snack",
-    title: "Snack anti-estres",
-    time: "Despues de 8:00pm si hace falta",
-    note: "Solo si sigue el hambre despues de agua + 10 min.",
-    options: [{ id: "snk_a", name: "Requeson + vegetales", kcal: 130, protein: 16, carbs: 9, fats: 3, description: "100g requeson/jocoque + pepino o zanahoria." }],
-  },
-];
-
-const DEFAULT_SUPPLEMENTS = [
-  { id: "sup_creatina", status: "Actual", name: "Creatina monohidratada", dose: "5g", timing: "Diario", note: "Mantener sin ciclar." },
-  { id: "sup_magnesio", status: "Actual", name: "Magnesio", dose: "dosis actual", timing: "Noche", note: "Recuperacion y descanso." },
-  { id: "sup_zinc", status: "Actual", name: "Zinc", dose: "dosis actual", timing: "Noche", note: "Soporte hormonal." },
-  { id: "sup_b", status: "Actual", name: "Complejo B", dose: "dosis actual", timing: "Manana", note: "Metabolismo energetico." },
-  { id: "sup_d3k2", status: "Agregar", name: "Vitamina D3 + K2", dose: "2000-4000 IU + 100mcg", timing: "Con comida con grasa", note: "Prioridad #1." },
-  { id: "sup_omega", status: "Agregar", name: "Omega-3 (EPA+DHA)", dose: "2-3g EPA+DHA", timing: "Con cena", note: "Reduce inflamacion." },
-  { id: "sup_whey", status: "Opcional", name: "Whey protein", dose: "1 scoop", timing: "Solo si faltan proteínas", note: "Completar objetivo diario." },
-  { id: "sup_ash", status: "Opcional", name: "Ashwagandha KSM-66", dose: "300-600mg", timing: "Con cena", note: "Si hay estres alto." },
-];
-
 const DEFAULT_STATE = {
   week: 1,
   dayIndex: 0,
   sessionDate: mexicoDate(),
   settings: DEFAULT_SETTINGS,
   routine: DEFAULT_ROUTINE,
-  dietMeals: DEFAULT_DIET_MEALS,
-  supplements: DEFAULT_SUPPLEMENTS,
   trainingLogs: {},
   weightLogs: [],
 };
@@ -410,8 +367,6 @@ function normalizeDraftLogs(candidate) {
 
 function normalizeState(candidate) {
   const routine = Array.isArray(candidate?.routine) && candidate.routine.length ? candidate.routine : DEFAULT_ROUTINE;
-  const dietMeals = Array.isArray(candidate?.dietMeals) && candidate.dietMeals.length ? candidate.dietMeals : DEFAULT_DIET_MEALS;
-  const supplements = Array.isArray(candidate?.supplements) && candidate.supplements.length ? candidate.supplements : DEFAULT_SUPPLEMENTS;
 
   return {
     week: Math.max(1, Number(candidate?.week) || 1),
@@ -436,31 +391,6 @@ function normalizeState(candidate) {
             note: exercise.note || "",
           }))
         : [],
-    })),
-    dietMeals: dietMeals.map((meal, mealIndex) => ({
-      id: meal.id || makeId(`meal${mealIndex}`),
-      title: meal.title || `Comida ${mealIndex + 1}`,
-      time: meal.time || "",
-      note: meal.note || "",
-      options: Array.isArray(meal.options)
-        ? meal.options.map((option, optIndex) => ({
-            id: option.id || makeId(`opt${optIndex}`),
-            name: option.name || "Nuevo platillo",
-            kcal: Number(option.kcal) || 0,
-            protein: Number(option.protein) || 0,
-            carbs: Number(option.carbs) || 0,
-            fats: Number(option.fats) || 0,
-            description: option.description || "",
-          }))
-        : [],
-    })),
-    supplements: supplements.map((item, idx) => ({
-      id: item.id || makeId(`sup${idx}`),
-      status: item.status || "Actual",
-      name: item.name || "Suplemento",
-      dose: item.dose || "",
-      timing: item.timing || "",
-      note: item.note || "",
     })),
     trainingLogs: normalizeTrainingLogs(candidate?.trainingLogs),
     weightLogs: Array.isArray(candidate?.weightLogs)
@@ -504,6 +434,101 @@ function loadDrafts() {
 
 function saveDrafts(drafts) {
   return safeLocalSet(DRAFT_KEY, JSON.stringify(drafts));
+}
+
+function cloneSnapshot(snapshot) {
+  return normalizeState(parseJson(JSON.stringify(snapshot), DEFAULT_STATE));
+}
+
+function createProfileRecord(snapshot, drafts = {}, overrides = {}) {
+  const nextSnapshot = cloneSnapshot(snapshot);
+  return {
+    id: overrides.id || makeId("profile"),
+    displayName: overrides.displayName || nextSnapshot.settings.profileName || "Nuevo usuario",
+    email: overrides.email || "",
+    pin: overrides.pin || "",
+    goal: overrides.goal || "recomp",
+    experience: overrides.experience || "intermediate",
+    daysPerWeek: Number(overrides.daysPerWeek) || 4,
+    equipment: overrides.equipment || "gym",
+    routineSource: overrides.routineSource || "current",
+    createdAt: overrides.createdAt || new Date().toISOString(),
+    snapshot: nextSnapshot,
+    drafts: normalizeDraftLogs(drafts),
+  };
+}
+
+function normalizeProfileRecord(candidate, fallbackSnapshot, fallbackDrafts = {}) {
+  const snapshot = candidate?.snapshot && typeof candidate.snapshot === "object"
+    ? cloneSnapshot(candidate.snapshot)
+    : cloneSnapshot(fallbackSnapshot);
+
+  return {
+    id: candidate?.id || makeId("profile"),
+    displayName: candidate?.displayName || snapshot.settings.profileName || "Usuario",
+    email: candidate?.email || "",
+    pin: candidate?.pin || "",
+    goal: candidate?.goal || "recomp",
+    experience: candidate?.experience || "intermediate",
+    daysPerWeek: Number(candidate?.daysPerWeek) || 4,
+    equipment: candidate?.equipment || "gym",
+    routineSource: candidate?.routineSource || "current",
+    createdAt: candidate?.createdAt || new Date().toISOString(),
+    snapshot,
+    drafts: normalizeDraftLogs(candidate?.drafts || fallbackDrafts),
+  };
+}
+
+function persistProfileLibrary(profiles, activeProfileId) {
+  safeLocalSet(
+    PROFILE_LIBRARY_KEY,
+    JSON.stringify({
+      version: 1,
+      activeProfileId,
+      profiles,
+    })
+  );
+}
+
+function loadProfileWorkspace() {
+  const baseState = loadState();
+  const baseDrafts = loadDrafts();
+  const rawWorkspace = parseJson(safeLocalGet(PROFILE_LIBRARY_KEY), null);
+  const rawProfiles = Array.isArray(rawWorkspace)
+    ? rawWorkspace
+    : Array.isArray(rawWorkspace?.profiles)
+      ? rawWorkspace.profiles
+      : null;
+
+  if (!rawProfiles || rawProfiles.length === 0) {
+    const firstProfile = createProfileRecord(baseState, baseDrafts, {
+      displayName: baseState.settings.profileName || DEFAULT_SETTINGS.profileName,
+      email: "",
+      routineSource: "legacy",
+    });
+    persistProfileLibrary([firstProfile], firstProfile.id);
+    return {
+      state: cloneSnapshot(firstProfile.snapshot),
+      drafts: normalizeDraftLogs(firstProfile.drafts),
+      profiles: [firstProfile],
+      activeProfileId: firstProfile.id,
+    };
+  }
+
+  const profiles = rawProfiles.map((profile) => normalizeProfileRecord(profile, baseState, baseDrafts));
+  const requestedActiveId =
+    safeSessionGet(SESSION_PROFILE_KEY) ||
+    rawWorkspace?.activeProfileId ||
+    profiles[0]?.id;
+  const activeProfile = profiles.find((profile) => profile.id === requestedActiveId) || profiles[0];
+
+  persistProfileLibrary(profiles, activeProfile.id);
+  return {
+    state: cloneSnapshot(activeProfile.snapshot),
+    drafts: normalizeDraftLogs(activeProfile.drafts),
+    profiles,
+    activeProfileId: activeProfile.id,
+  };
 }
 
 function saveState(state, forceBackup = false) {
@@ -612,6 +637,77 @@ function formatSessionDate(input) {
   }).format(date);
 }
 
+function formatLongDate(input) {
+  if (!input || typeof input !== "string") return "--";
+  const [year, month, day] = input.split("-").map(Number);
+  if (!year || !month || !day) return input;
+  const date = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
+  const formatted = new Intl.DateTimeFormat("es-MX", {
+    timeZone: APP_TIMEZONE,
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  }).format(date);
+  return formatted.charAt(0).toUpperCase() + formatted.slice(1);
+}
+
+function msUntilNextMexicoMidnight(now = new Date()) {
+  const todayStr = mexicoDate(now);
+  for (let offset = 1; offset <= 26; offset += 1) {
+    const candidate = new Date(now.getTime() + offset * 60 * 60 * 1000);
+    if (mexicoDate(candidate) !== todayStr) {
+      let lo = now.getTime();
+      let hi = candidate.getTime();
+      while (hi - lo > 1000) {
+        const mid = Math.floor((lo + hi) / 2);
+        if (mexicoDate(new Date(mid)) === todayStr) lo = mid;
+        else hi = mid;
+      }
+      return Math.max(1000, hi - now.getTime());
+    }
+  }
+  return 60 * 60 * 1000;
+}
+
+function formatDateOnly(input) {
+  if (!input) return "--";
+  const date = new Date(input);
+  if (Number.isNaN(date.getTime())) return formatSessionDate(String(input));
+  return date.toLocaleDateString("es-MX", {
+    timeZone: APP_TIMEZONE,
+    month: "2-digit",
+    day: "2-digit",
+  });
+}
+
+function formatMinutesAsHours(minutes) {
+  const value = Number(minutes);
+  if (!value) return "--";
+  return `${(value / 60).toFixed(1)}h`;
+}
+
+function formatDistanceKm(meters) {
+  const value = Number(meters);
+  if (!value) return "--";
+  return `${(value / 1000).toFixed(1)}km`;
+}
+
+function formatProviderName(provider) {
+  const raw = String(provider || "").trim();
+  if (!raw) return "Proveedor";
+  return raw
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((chunk) => chunk.charAt(0).toUpperCase() + chunk.slice(1))
+    .join(" ");
+}
+
+function resolveInitialTab() {
+  if (typeof window === "undefined") return "rutina";
+  const requested = new URLSearchParams(window.location.search).get("tab");
+  return APP_TABS.some(([id]) => id === requested) ? requested : "rutina";
+}
+
 function parseRestSeconds(raw) {
   if (!raw || typeof raw !== "string") return 90;
   const text = raw.toLowerCase();
@@ -660,7 +756,283 @@ function getExerciseHistory(trainingLogs, dayId, exerciseId) {
   });
 }
 
-function AccessGate({ onUnlock }) {
+function ProfileSetupCard({ baseSnapshot, onSave, onCancel, ctaLabel = "Crear usuario" }) {
+  const [displayName, setDisplayName] = useState("");
+  const [email, setEmail] = useState("");
+  const [pin, setPin] = useState("");
+  const [goal, setGoal] = useState("recomp");
+  const [experience, setExperience] = useState("intermediate");
+  const [daysPerWeek, setDaysPerWeek] = useState("4");
+  const [equipment, setEquipment] = useState("gym");
+  const [startWeight, setStartWeight] = useState(baseSnapshot.settings.startWeight || 0);
+  const [goalWeight, setGoalWeight] = useState(baseSnapshot.settings.goalWeight || 0);
+  const [routineMode, setRoutineMode] = useState("recommended");
+  const [routineText, setRoutineText] = useState("");
+  const [importFileName, setImportFileName] = useState("");
+  const [error, setError] = useState("");
+  const recommendedRoutine = useMemo(
+    () =>
+      buildRecommendedRoutine({
+        goal,
+        experience,
+        daysPerWeek,
+        equipment,
+      }),
+    [daysPerWeek, equipment, experience, goal]
+  );
+
+  const handleFile = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      setRoutineText(text);
+      setImportFileName(file.name || "");
+      setError("");
+    } catch {
+      setError("No se pudo leer el archivo.");
+    } finally {
+      event.target.value = "";
+    }
+  };
+
+  const handleSubmit = () => {
+    const name = displayName.trim();
+    if (!name) {
+      setError("Escribe un nombre para el usuario.");
+      return;
+    }
+
+    let routine = cloneSnapshot(baseSnapshot).routine;
+    let routineSource = "current";
+
+    try {
+      if (routineMode === "recommended") {
+        routine = recommendedRoutine;
+        routineSource = "recommended";
+      }
+
+      if (routineMode === "paste" || routineMode === "file") {
+        const imported = parseRoutineImport(routineText, importFileName);
+        routine = imported.routine;
+        routineSource = imported.source;
+      }
+    } catch (parseError) {
+      setError(parseError.message || "No se pudo importar la rutina.");
+      return;
+    }
+
+    const snapshot = normalizeState({
+      ...cloneSnapshot(baseSnapshot),
+      settings: {
+        ...baseSnapshot.settings,
+        profileName: name,
+        startWeight: Number(startWeight) || 0,
+        goalWeight: Number(goalWeight) || 0,
+        focusNote: `${goal === "fat_loss" ? "Definicion" : goal === "muscle_gain" ? "Hipertrofia" : "Recomposicion"} - ${experience}`,
+      },
+      routine,
+      trainingLogs: {},
+      weightLogs: Number(startWeight) > 0
+        ? [{ id: makeId("w"), date: mexicoDate(), weight: Number(startWeight), waist: null, ts: Date.now() }]
+        : [],
+    });
+
+    onSave({
+      record: createProfileRecord(snapshot, {}, {
+        displayName: name,
+        email: email.trim().toLowerCase(),
+        pin: pin.trim(),
+        goal,
+        experience,
+        daysPerWeek: Number(daysPerWeek) || 4,
+        equipment,
+        routineSource,
+      }),
+    });
+  };
+
+  return (
+    <article className="card top-10">
+      <div className="row space-between wrap">
+        <h4>Nuevo usuario</h4>
+        {onCancel && <button className="btn btn-ghost btn-mini" type="button" onClick={onCancel}>Cancelar</button>}
+      </div>
+
+      <div className="grid-two top-8">
+        <Field label="Nombre" value={displayName} onChange={setDisplayName} placeholder="Sebastian" />
+        <Field label="Email" type="email" value={email} onChange={setEmail} placeholder="correo@ejemplo.com" />
+        <Field label="PIN opcional" type="password" value={pin} onChange={setPin} placeholder="4-6 digitos" />
+        <label className="field">
+          <span>Objetivo</span>
+          <select className="input" value={goal} onChange={(event) => setGoal(event.target.value)}>
+            <option value="recomp">Recomposicion</option>
+            <option value="fat_loss">Definicion</option>
+            <option value="muscle_gain">Ganancia muscular</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>Nivel</span>
+          <select className="input" value={experience} onChange={(event) => setExperience(event.target.value)}>
+            <option value="beginner">Principiante</option>
+            <option value="intermediate">Intermedio</option>
+            <option value="advanced">Avanzado</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>Dias por semana</span>
+          <select className="input" value={daysPerWeek} onChange={(event) => setDaysPerWeek(event.target.value)}>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+            <option value="6">6</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>Equipo</span>
+          <select className="input" value={equipment} onChange={(event) => setEquipment(event.target.value)}>
+            <option value="gym">Gym completo</option>
+            <option value="mixed">Mixto</option>
+            <option value="home">Casa</option>
+          </select>
+        </label>
+        <Field label="Peso actual" type="number" step="0.1" value={startWeight} onChange={setStartWeight} placeholder="78" />
+        <Field label="Peso meta" type="number" step="0.1" value={goalWeight} onChange={setGoalWeight} placeholder="72" />
+      </div>
+
+      <div className="top-12">
+        <div className="row gap-8 wrap">
+          {[
+            ["recommended", "Recomendada"],
+            ["current", "Usar actual"],
+            ["paste", "Pegar texto"],
+            ["file", "Subir archivo"],
+          ].map(([value, label]) => (
+            <button
+              key={value}
+              className={`btn btn-mini ${routineMode === value ? "btn-primary" : "btn-ghost"}`}
+              type="button"
+              onClick={() => setRoutineMode(value)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {routineMode === "recommended" && (
+          <p className="tiny-note">Se generara una rutina personalizada segun objetivo, nivel, dias y equipo.</p>
+        )}
+
+        {routineMode === "paste" && (
+          <label className="field top-8">
+            <span>Texto / Markdown / CSV / JSON</span>
+            <textarea
+              className="input"
+              rows={8}
+              value={routineText}
+              onChange={(event) => setRoutineText(event.target.value)}
+              placeholder={"Ejemplo:\nLunes - Push\n- Bench press | 4 | 8-10 | 90s | pesado\n- Incline press | 3 | 10-12 | 75s"}
+            />
+          </label>
+        )}
+
+        {routineMode === "file" && (
+          <div className="top-8">
+            <label className="btn btn-ghost file-label">
+              Subir .json / .csv / .txt / .md
+              <input type="file" accept=".json,.csv,.txt,.md,text/plain,text/csv,application/json" onChange={handleFile} />
+            </label>
+            {importFileName && <p className="tiny-note">Archivo listo: {importFileName}</p>}
+          </div>
+        )}
+      </div>
+
+      {error && <p className="error-text top-8">{error}</p>}
+
+      <div className="row gap-8 wrap top-12">
+        <button className="btn btn-primary" type="button" onClick={handleSubmit}>{ctaLabel}</button>
+      </div>
+    </article>
+  );
+}
+
+function ProfileGate({ profiles, activeProfileId, onSelectProfile, onCreateProfile }) {
+  const [creating, setCreating] = useState(profiles.length === 0);
+  const [selectedId, setSelectedId] = useState(activeProfileId || profiles[0]?.id || "");
+  const [pin, setPin] = useState("");
+  const [error, setError] = useState("");
+  const selectedProfile = profiles.find((profile) => profile.id === selectedId) || profiles[0] || null;
+
+  const continueProfile = () => {
+    if (!selectedProfile) return;
+    if (selectedProfile.pin && selectedProfile.pin !== pin.trim()) {
+      setError("PIN incorrecto.");
+      return;
+    }
+    onSelectProfile(selectedProfile.id);
+  };
+
+  return (
+    <div className="gate-shell gate-overlay">
+      <div className="gate-card gate-card-wide">
+        <p className="gate-tag">USERS</p>
+        <h1>Elige usuario</h1>
+        <p className="gate-sub">Cada usuario guarda su progreso, rutina y configuracion por separado.</p>
+
+        {creating ? (
+          <ProfileSetupCard
+            baseSnapshot={selectedProfile?.snapshot || DEFAULT_STATE}
+            onSave={(payload) => {
+              onCreateProfile(payload.record);
+              setCreating(false);
+            }}
+            onCancel={profiles.length ? () => setCreating(false) : null}
+            ctaLabel="Crear y entrar"
+          />
+        ) : (
+          <>
+            <div className="stack gap-8 top-10">
+              {profiles.map((profile) => (
+                <button
+                  key={profile.id}
+                  type="button"
+                  className={`profile-card ${selectedId === profile.id ? "selected" : ""}`}
+                  onClick={() => {
+                    setSelectedId(profile.id);
+                    setPin("");
+                    setError("");
+                  }}
+                >
+                  <div>
+                    <strong>{profile.displayName}</strong>
+                    <p className="muted small top-6">{profile.goal} - {profile.daysPerWeek} dias - {profile.routineSource}</p>
+                  </div>
+                  <span className="pill">{profile.pin ? "PIN" : "Libre"}</span>
+                </button>
+              ))}
+            </div>
+
+            {selectedProfile?.pin && (
+              <label className="field top-10">
+                <span>PIN del usuario</span>
+                <input className="input" type="password" value={pin} onChange={(event) => setPin(event.target.value)} placeholder="PIN" />
+              </label>
+            )}
+
+            {error && <p className="error-text top-8">{error}</p>}
+
+            <div className="row gap-8 wrap top-12">
+              <button className="btn btn-primary" type="button" onClick={continueProfile}>Entrar</button>
+              <button className="btn btn-ghost" type="button" onClick={() => setCreating(true)}>Crear usuario</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AccessGate({ onUnlock, profileCount }) {
   const [value, setValue] = useState("");
   const [error, setError] = useState("");
 
@@ -677,8 +1049,8 @@ function AccessGate({ onUnlock }) {
     <div className="gate-shell">
       <div className="gate-card">
         <p className="gate-tag">APP</p>
-          <h1>Acceso privado</h1>
-        <p className="gate-sub">Ingresa la clave para abrir tu panel.</p>
+        <h1>Workspace privado</h1>
+        <p className="gate-sub">Ingresa la clave maestra para abrir el panel y elegir usuario.</p>
         <form onSubmit={onSubmit} className="stack gap-8">
           <input
             className="input"
@@ -694,6 +1066,7 @@ function AccessGate({ onUnlock }) {
           {error && <p className="error-text">{error}</p>}
           <button className="btn btn-primary" type="submit">Entrar</button>
         </form>
+        {profileCount > 0 && <p className="tiny-note">Usuarios disponibles: {profileCount}</p>}
         <p className="tiny-note">Clave desde <code>VITE_APP_ACCESS_KEY</code>{USING_FALLBACK_KEY ? " (fallback activo)" : ""}.</p>
       </div>
     </div>
@@ -938,8 +1311,14 @@ function ExerciseLogCard({
 }
 
 export default function App() {
-  const [state, setState] = useState(() => loadState());
-  const [draftLogs, setDraftLogs] = useState(() => loadDrafts());
+  const workspaceSeedRef = useRef(null);
+  if (!workspaceSeedRef.current) workspaceSeedRef.current = loadProfileWorkspace();
+  const initialWorkspace = workspaceSeedRef.current;
+
+  const [state, setState] = useState(() => initialWorkspace.state);
+  const [draftLogs, setDraftLogs] = useState(() => initialWorkspace.drafts);
+  const [profiles, setProfiles] = useState(() => initialWorkspace.profiles);
+  const [activeProfileId, setActiveProfileId] = useState(() => initialWorkspace.activeProfileId);
   const [authSession, setAuthSession] = useState(null);
   const [authReady, setAuthReady] = useState(!REQUIRE_SUPABASE_AUTH);
   const [authEmail, setAuthEmail] = useState("");
@@ -964,25 +1343,29 @@ export default function App() {
   const knownCloudUpdatedAtRef = useRef(null);
   const forceCloudOverwriteRef = useRef(false);
   const routineTrackRef = useRef(null);
-  const [tab, setTab] = useState("rutina");
+  const [tab, setTab] = useState(() => resolveInitialTab());
   const [quickModeEnabled, setQuickModeEnabled] = useState(true);
   const [routineEditMode, setRoutineEditMode] = useState(false);
   const [activeExerciseCard, setActiveExerciseCard] = useState(0);
   const [routineSavedMessage, setRoutineSavedMessage] = useState("");
   const [restTimer, setRestTimer] = useState({ endAt: null, seconds: 0, exercise: "" });
   const [timerNow, setTimerNow] = useState(Date.now());
-  const [dietEditMode, setDietEditMode] = useState(false);
-  const [supplementEditMode, setSupplementEditMode] = useState(false);
   const [weightForm, setWeightForm] = useState({ date: mexicoDate(), weight: "", waist: "" });
   const [historyQuery, setHistoryQuery] = useState("");
   const [selectedHistorySessionId, setSelectedHistorySessionId] = useState("");
+  const [profileGateOpen, setProfileGateOpen] = useState(() => !safeSessionGet(SESSION_PROFILE_KEY));
+  const [profileComposerOpen, setProfileComposerOpen] = useState(false);
   const [isUnlocked, setIsUnlocked] = useState(() => safeSessionGet(SESSION_UNLOCK_KEY) === "1");
+  const activeProfile = useMemo(
+    () => profiles.find((profile) => profile.id === activeProfileId) || profiles[0] || null,
+    [profiles, activeProfileId]
+  );
   const cloudIdentity = useMemo(
     () => ({
-      profileKey: SUPABASE_PROFILE_KEY,
+      profileKey: activeProfileId ? `${SUPABASE_PROFILE_KEY}:${activeProfileId}` : SUPABASE_PROFILE_KEY,
       userId: REQUIRE_SUPABASE_AUTH ? authSession?.user?.id || null : null,
     }),
-    [authSession]
+    [activeProfileId, authSession]
   );
   const cloudCanSync = CLOUD_ENABLED && (!REQUIRE_SUPABASE_AUTH || Boolean(cloudIdentity.userId));
 
@@ -1042,9 +1425,63 @@ export default function App() {
     return () => clearInterval(id);
   }, [restTimer.endAt]);
 
+  const [todayMx, setTodayMx] = useState(() => mexicoDate());
+
+  useEffect(() => {
+    let timeoutId = null;
+    const schedule = () => {
+      const delay = msUntilNextMexicoMidnight();
+      timeoutId = setTimeout(() => {
+        const newToday = mexicoDate();
+        setTodayMx((prev) => {
+          if (prev !== newToday) {
+            setState((prevState) =>
+              prevState.sessionDate === prev ? { ...prevState, sessionDate: newToday } : prevState
+            );
+          }
+          return newToday;
+        });
+        schedule();
+      }, delay + 500);
+    };
+    schedule();
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      const newToday = mexicoDate();
+      setTodayMx((prev) => {
+        if (prev !== newToday) {
+          setState((prevState) =>
+            prevState.sessionDate === prev ? { ...prevState, sessionDate: newToday } : prevState
+          );
+        }
+        return newToday;
+      });
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, []);
+
   useEffect(() => {
     setSaveMeta(saveState(state));
-  }, [state]);
+    setProfiles((prev) => {
+      const nextProfiles = prev.map((profile) =>
+        profile.id === activeProfileId
+          ? {
+              ...profile,
+              displayName: state.settings.profileName || profile.displayName,
+              email: profile.email,
+              snapshot: cloneSnapshot(state),
+              drafts: normalizeDraftLogs(draftLogs),
+            }
+          : profile
+      );
+      persistProfileLibrary(nextProfiles, activeProfileId);
+      return nextProfiles;
+    });
+  }, [activeProfileId, draftLogs, state]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1249,6 +1686,7 @@ export default function App() {
   const unlock = () => {
     safeSessionSet(SESSION_UNLOCK_KEY, "1");
     setIsUnlocked(true);
+    setProfileGateOpen(true);
   };
 
   const lock = () => {
@@ -1256,7 +1694,52 @@ export default function App() {
       signOutAuth();
     }
     safeSessionRemove(SESSION_UNLOCK_KEY);
+    safeSessionRemove(SESSION_PROFILE_KEY);
     setIsUnlocked(false);
+    setProfileGateOpen(true);
+  };
+
+  const syncProfiles = (nextProfiles, nextActiveProfileId = activeProfileId) => {
+    persistProfileLibrary(nextProfiles, nextActiveProfileId);
+    setProfiles(nextProfiles);
+    setActiveProfileId(nextActiveProfileId);
+  };
+
+  const selectProfile = (profileId, sourceProfiles = profiles) => {
+    const nextProfile = sourceProfiles.find((profile) => profile.id === profileId);
+    if (!nextProfile) return;
+
+    safeSessionSet(SESSION_PROFILE_KEY, profileId);
+    setActiveProfileId(profileId);
+    setState(cloneSnapshot(nextProfile.snapshot));
+    setDraftLogs(normalizeDraftLogs(nextProfile.drafts));
+    setProfileGateOpen(false);
+    setProfileComposerOpen(false);
+    setTab("rutina");
+  };
+
+  const createProfile = (record) => {
+    const nextProfiles = [...profiles, record];
+    syncProfiles(nextProfiles, record.id);
+    selectProfile(record.id, nextProfiles);
+  };
+
+  const removeProfile = (profileId) => {
+    if (profiles.length <= 1) {
+      window.alert("Debe quedar al menos un usuario.");
+      return;
+    }
+    const target = profiles.find((profile) => profile.id === profileId);
+    if (!target) return;
+    if (!window.confirm(`Borrar a ${target.displayName}?`)) return;
+
+    const nextProfiles = profiles.filter((profile) => profile.id !== profileId);
+    const fallbackProfile = nextProfiles[0];
+    syncProfiles(nextProfiles, fallbackProfile.id);
+
+    if (activeProfileId === profileId) {
+      selectProfile(fallbackProfile.id, nextProfiles);
+    }
   };
 
   const selectedDay = state.routine[state.dayIndex] || state.routine[0];
@@ -1773,81 +2256,36 @@ export default function App() {
     });
   };
 
-  const addMeal = () => {
-    setState((prev) => ({
-      ...prev,
-      dietMeals: [...prev.dietMeals, { id: makeId("m"), title: "Nueva comida", time: "", note: "", options: [] }],
-    }));
+  const moveExercise = (exerciseId, delta) => {
+    setState((prev) => {
+      const routine = [...prev.routine];
+      const day = { ...routine[prev.dayIndex] };
+      const exercises = [...day.exercises];
+      const idx = exercises.findIndex((ex) => ex.id === exerciseId);
+      const target = idx + delta;
+      if (idx < 0 || target < 0 || target >= exercises.length) return prev;
+      const [item] = exercises.splice(idx, 1);
+      exercises.splice(target, 0, item);
+      day.exercises = exercises;
+      routine[prev.dayIndex] = day;
+      return { ...prev, routine };
+    });
   };
 
-  const removeMeal = (mealId) => {
-    if (!window.confirm("Borrar esta comida y sus platillos?")) return;
-    setState((prev) => ({ ...prev, dietMeals: prev.dietMeals.filter((meal) => meal.id !== mealId) }));
-  };
-
-  const updateMeal = (mealId, field, value) => {
-    setState((prev) => ({
-      ...prev,
-      dietMeals: prev.dietMeals.map((meal) => (meal.id === mealId ? { ...meal, [field]: value } : meal)),
-    }));
-  };
-
-  const addDish = (mealId) => {
-    setState((prev) => ({
-      ...prev,
-      dietMeals: prev.dietMeals.map((meal) =>
-        meal.id === mealId
-          ? { ...meal, options: [...meal.options, { id: makeId("o"), name: "Nuevo platillo", kcal: 0, protein: 0, carbs: 0, fats: 0, description: "" }] }
-          : meal
-      ),
-    }));
-  };
-
-  const removeDish = (mealId, optionId) => {
-    setState((prev) => ({
-      ...prev,
-      dietMeals: prev.dietMeals.map((meal) =>
-        meal.id === mealId ? { ...meal, options: meal.options.filter((option) => option.id !== optionId) } : meal
-      ),
-    }));
-  };
-
-  const updateDish = (mealId, optionId, field, value) => {
-    setState((prev) => ({
-      ...prev,
-      dietMeals: prev.dietMeals.map((meal) => {
-        if (meal.id !== mealId) return meal;
-        return {
-          ...meal,
-          options: meal.options.map((option) => {
-            if (option.id !== optionId) return option;
-            if (["kcal", "protein", "carbs", "fats"].includes(field)) {
-              const parsed = Number(value);
-              return { ...option, [field]: Number.isNaN(parsed) ? 0 : parsed };
-            }
-            return { ...option, [field]: value };
-          }),
-        };
-      }),
-    }));
-  };
-
-  const addSupplement = () => {
-    setState((prev) => ({
-      ...prev,
-      supplements: [...prev.supplements, { id: makeId("sup"), status: "Actual", name: "Nuevo suplemento", dose: "", timing: "", note: "" }],
-    }));
-  };
-
-  const removeSupplement = (id) => {
-    setState((prev) => ({ ...prev, supplements: prev.supplements.filter((item) => item.id !== id) }));
-  };
-
-  const updateSupplement = (id, field, value) => {
-    setState((prev) => ({
-      ...prev,
-      supplements: prev.supplements.map((item) => (item.id === id ? { ...item, [field]: value } : item)),
-    }));
+  const duplicateExercise = (exerciseId) => {
+    setState((prev) => {
+      const routine = [...prev.routine];
+      const day = { ...routine[prev.dayIndex] };
+      const exercises = [...day.exercises];
+      const idx = exercises.findIndex((ex) => ex.id === exerciseId);
+      if (idx < 0) return prev;
+      const original = exercises[idx];
+      const copy = { ...original, id: makeId("e"), name: `${original.name} (copia)` };
+      exercises.splice(idx + 1, 0, copy);
+      day.exercises = exercises;
+      routine[prev.dayIndex] = day;
+      return { ...prev, routine };
+    });
   };
 
   const exportProgressCsv = () => {
@@ -2001,7 +2439,7 @@ export default function App() {
   };
 
   const resetDefaults = () => {
-    if (!window.confirm("Restaurar rutina/dieta/suplementos por defecto?")) return;
+    if (!window.confirm("Restaurar rutina por defecto?")) return;
     setState(normalizeState(DEFAULT_STATE));
   };
 
@@ -2036,7 +2474,18 @@ export default function App() {
         />
       );
     }
-    return <AccessGate onUnlock={unlock} />;
+    return <AccessGate onUnlock={unlock} profileCount={profiles.length} />;
+  }
+
+  if (profileGateOpen) {
+    return (
+      <ProfileGate
+        profiles={profiles}
+        activeProfileId={activeProfileId}
+        onSelectProfile={selectProfile}
+        onCreateProfile={createProfile}
+      />
+    );
   }
 
   return (
@@ -2049,9 +2498,14 @@ export default function App() {
           </p>
           <p className="hero-sync">{saveStatusText}</p>
         </div>
-        <button className="btn btn-ghost" type="button" onClick={lock}>
-          {REQUIRE_SUPABASE_AUTH ? "Salir" : "Bloquear"}
-        </button>
+        <div className="stack gap-8 hero-actions">
+          <button className="btn btn-soft btn-mini" type="button" onClick={() => setProfileGateOpen(true)}>
+            {activeProfile?.displayName || "Usuario"}
+          </button>
+          <button className="btn btn-ghost btn-mini" type="button" onClick={lock}>
+            {REQUIRE_SUPABASE_AUTH ? "Salir" : "Bloquear"}
+          </button>
+        </div>
       </header>
 
       <section className="kpi-strip">
@@ -2073,26 +2527,37 @@ export default function App() {
         </article>
       </section>
 
-      <nav className="tabs">
-        {[ ["rutina", "Hoy"], ["historial", "Rutinas"], ["progreso", "Progreso"], ["dieta", "Dieta"], ["suplementos", "Suples"], ["config", "Ajustes"] ].map(([id, label]) => (
+      <nav className="tabs" style={{ gridTemplateColumns: `repeat(${APP_TABS.length}, minmax(0, 1fr))` }}>
+        {APP_TABS.map(([id, label]) => (
           <button key={id} type="button" className={`tab ${tab === id ? "active" : ""}`} onClick={() => setTab(id)}>{label}</button>
         ))}
       </nav>
 
-      {tab === "rutina" && (
-        <section className="panel">
-          <div className="row space-between wrap">
-            <h2>Rutina</h2>
-            <div className="row gap-8 wrap">
-              <button className="btn btn-ghost" type="button" onClick={() => changeWeek(-1)}>Semana -</button>
-              <span className="week-badge">Semana {state.week}</span>
-              <button className="btn btn-ghost" type="button" onClick={() => changeWeek(1)}>Semana +</button>
+      {tab === "rutina" && !routineEditMode && (
+        <section className="panel home-panel">
+          <article className={`today-banner ${state.sessionDate === todayMx ? "is-today" : "is-other"}`}>
+            <div className="today-banner-main">
+              <p className="today-banner-kicker">{state.sessionDate === todayMx ? "Hoy" : "Viendo"}</p>
+              <h2 className="today-banner-title">{formatLongDate(state.sessionDate)}</h2>
+              <p className="today-banner-sub">Semana {state.week} · {selectedDay.type}</p>
             </div>
-          </div>
+            <div className="today-banner-actions">
+              {state.sessionDate !== todayMx && (
+                <button className="btn btn-primary btn-mini" type="button" onClick={() => setSessionDate(todayMx)}>
+                  Ir a hoy
+                </button>
+              )}
+              <div className="today-banner-week">
+                <button className="week-step" type="button" onClick={() => changeWeek(-1)} aria-label="Semana anterior">−</button>
+                <span className="week-step-label">S{state.week}</span>
+                <button className="week-step" type="button" onClick={() => changeWeek(1)} aria-label="Semana siguiente">+</button>
+              </div>
+            </div>
+          </article>
 
-          <div className="field top-8">
-            <span>Fecha</span>
-            <div className="date-control-row">
+          <details className="date-picker-collapse top-10">
+            <summary>Cambiar fecha de sesión</summary>
+            <div className="date-control-row top-8">
               <input
                 className="input date-input-main"
                 type="date"
@@ -2102,7 +2567,7 @@ export default function App() {
               <button
                 className="btn btn-ghost btn-date-icon"
                 type="button"
-                onClick={() => setSessionDate(mexicoDate())}
+                onClick={() => setSessionDate(todayMx)}
                 aria-label="Usar fecha de hoy"
                 title="Hoy"
               >
@@ -2113,10 +2578,10 @@ export default function App() {
                 </svg>
               </button>
             </div>
-          </div>
-          <p className="muted small top-6">Zona horaria activa: UTC-6 (Ciudad de México).</p>
+            <p className="muted small top-6">Zona horaria: UTC-6 (Ciudad de México). La fecha de hoy se actualiza sola a medianoche.</p>
+          </details>
 
-          <div className="day-chip-row">
+          <div className="day-chip-row day-chip-row-tall top-10">
             {state.routine.map((day, index) => {
               const dateLogs = state.trainingLogs?.[day.id]?.[state.sessionDate] || {};
               const dayDraft = draftLogs?.[makeDraftSessionKey(day.id, state.sessionDate)] || {};
@@ -2126,37 +2591,50 @@ export default function App() {
                 return hasSaved || hasDraft;
               });
               return (
-                <button key={day.id} type="button" className={`day-chip ${index === state.dayIndex ? "active" : ""}`} onClick={() => selectDay(index)}>
-                  {day.shortDay}
+                <button
+                  key={day.id}
+                  type="button"
+                  className={`day-chip day-chip-tall ${index === state.dayIndex ? "active" : ""}`}
+                  onClick={() => selectDay(index)}
+                >
+                  <span className="day-chip-short">{day.shortDay}</span>
+                  <span className="day-chip-count">{day.exercises.length || (day.cardioProtocol ? "C" : "0")}</span>
                   {hasLogs && <span className="dot" />}
                 </button>
               );
             })}
           </div>
 
-          <article className="focus-card">
-            <p className="focus-kicker">{selectedDay.fullDay} - {selectedDay.type}</p>
-            <h3>{selectedDay.title}</h3>
-            <p className="muted">{selectedDay.postCardio || ""}</p>
+          <article className="focus-card focus-card-xl top-10">
+            <div className="row space-between wrap">
+              <div>
+                <p className="focus-kicker">{selectedDay.fullDay} · {selectedDay.type}</p>
+                <h3>{selectedDay.title}</h3>
+              </div>
+              <div className="focus-stats">
+                <span className="focus-stat">
+                  <strong>{selectedDay.exercises.length}</strong>
+                  <small>ejercicios</small>
+                </span>
+              </div>
+            </div>
+            {selectedDay.postCardio && <p className="muted top-8">{selectedDay.postCardio}</p>}
             {selectedDay.cardioProtocol && <p className="muted top-6">{selectedDay.cardioProtocol}</p>}
           </article>
 
-          <div className="row space-between wrap">
-            <p className="muted">Caminata diaria con el perro: ~30 min (no cuenta como Z2).</p>
-            <div className="row gap-8 wrap">
-              <button className={`btn ${quickModeEnabled ? "btn-primary" : "btn-ghost"}`} type="button" onClick={() => setQuickModeEnabled((prev) => !prev)}>
-                {quickModeEnabled ? "Modo rapido ON" : "Modo rapido OFF"}
-              </button>
-              <button className="btn btn-soft" type="button" onClick={autofillSessionFromPrevious}>Autocompletar</button>
-              <button className="btn btn-ghost" type="button" onClick={() => setRoutineEditMode((prev) => !prev)}>
-                {routineEditMode ? "Cerrar edicion" : "Editar rutina"}
-              </button>
-            </div>
+          <div className="home-actions top-10">
+            <button className={`btn ${quickModeEnabled ? "btn-primary" : "btn-ghost"}`} type="button" onClick={() => setQuickModeEnabled((prev) => !prev)}>
+              {quickModeEnabled ? "Modo rápido ON" : "Modo rápido OFF"}
+            </button>
+            <button className="btn btn-soft" type="button" onClick={autofillSessionFromPrevious}>Autocompletar</button>
+            <button className="btn btn-ghost" type="button" onClick={() => setRoutineEditMode(true)}>
+              Editar rutina
+            </button>
           </div>
 
-          {!routineEditMode && selectedDay.exercises.length > 0 && (
+          {selectedDay.exercises.length > 0 && (
             <div className="top-10">
-              <p className="muted small">Desliza horizontalmente para capturar cada ejercicio. La ultima tarjeta finaliza y guarda todo.</p>
+              <p className="muted small">Desliza horizontalmente para capturar cada ejercicio. La última tarjeta finaliza y guarda todo.</p>
               {routineSavedMessage && <p className="trend top-6">{routineSavedMessage}</p>}
 
               {quickModeEnabled && (
@@ -2253,56 +2731,121 @@ export default function App() {
             </div>
           )}
 
-          {!routineEditMode && selectedDay.exercises.length === 0 && (
+          {selectedDay.exercises.length === 0 && (
             <article className="card top-10">
-              <p className="muted">Día de cardio. Si quieres agregar ejercicios en este bloque, activa "Editar rutina".</p>
+              <p className="muted">Sin ejercicios en este día. Toca "Editar rutina" para agregar bloques.</p>
             </article>
           )}
+        </section>
+      )}
 
-          {routineEditMode && (
-            <div className="stack gap-12 top-12">
-              <article className="card">
-                <h4>Editar día</h4>
-                <div className="grid-two top-8">
-                  <Field label="Etiqueta corta" value={selectedDay.shortDay} onChange={(value) => updateSelectedDay("shortDay", value)} />
-                  <Field label="Día completo" value={selectedDay.fullDay} onChange={(value) => updateSelectedDay("fullDay", value)} />
-                  <Field label="Tipo" value={selectedDay.type} onChange={(value) => updateSelectedDay("type", value)} />
-                  <Field label="Título" value={selectedDay.title} onChange={(value) => updateSelectedDay("title", value)} />
-                  <Field label="Post-cardio" value={selectedDay.postCardio} onChange={(value) => updateSelectedDay("postCardio", value)} />
-                </div>
-                <label className="field top-8">
-                  <span>Protocolo cardio (si aplica)</span>
-                  <textarea className="input" rows={3} value={selectedDay.cardioProtocol} onChange={(event) => updateSelectedDay("cardioProtocol", event.target.value)} />
-                </label>
-                <div className="row gap-8 wrap top-8">
-                  <button className="btn btn-primary" type="button" onClick={addRoutineDay}>Agregar día</button>
-                  <button className="btn btn-danger" type="button" onClick={removeSelectedDay}>Borrar día</button>
-                </div>
-              </article>
-
-              <article className="card">
-                <div className="row space-between wrap">
-                  <h4>Editar ejercicios</h4>
-                  <button className="btn btn-primary" type="button" onClick={addExercise}>Agregar ejercicio</button>
-                </div>
-                {selectedDay.exercises.length === 0 && <p className="muted top-8">Sin ejercicios en este día.</p>}
-                <div className="stack gap-8 top-8">
-                  {selectedDay.exercises.map((exercise) => (
-                    <div key={exercise.id} className="exercise-editor">
-                      <Field label="Ejercicio" value={exercise.name} onChange={(value) => updateExercise(exercise.id, "name", value)} />
-                      <div className="grid-two top-6">
-                        <Field label="Series" value={exercise.sets} onChange={(value) => updateExercise(exercise.id, "sets", value)} />
-                        <Field label="Reps" value={exercise.reps} onChange={(value) => updateExercise(exercise.id, "reps", value)} />
-                        <Field label="Descanso" value={exercise.rest} onChange={(value) => updateExercise(exercise.id, "rest", value)} />
-                        <Field label="Nota" value={exercise.note} onChange={(value) => updateExercise(exercise.id, "note", value)} />
-                      </div>
-                      <button className="btn btn-danger top-6" type="button" onClick={() => removeExercise(exercise.id)}>Borrar ejercicio</button>
-                    </div>
-                  ))}
-                </div>
-              </article>
+      {tab === "rutina" && routineEditMode && (
+        <section className="panel editor-panel">
+          <header className="editor-header">
+            <div>
+              <p className="editor-kicker">Editor de rutina</p>
+              <h2>{selectedDay.fullDay}</h2>
+              <p className="muted small top-6">{selectedDay.exercises.length} ejercicios · Semana {state.week}</p>
             </div>
-          )}
+            <button className="btn btn-primary" type="button" onClick={() => setRoutineEditMode(false)}>
+              Listo
+            </button>
+          </header>
+
+          <div className="day-chip-row day-chip-row-tall top-10">
+            {state.routine.map((day, index) => (
+              <button
+                key={day.id}
+                type="button"
+                className={`day-chip day-chip-tall ${index === state.dayIndex ? "active" : ""}`}
+                onClick={() => selectDay(index)}
+              >
+                <span className="day-chip-short">{day.shortDay}</span>
+                <span className="day-chip-count">{day.exercises.length}</span>
+              </button>
+            ))}
+            <button className="day-chip day-chip-tall day-chip-add" type="button" onClick={addRoutineDay} aria-label="Agregar día">
+              <span className="day-chip-short">+</span>
+              <span className="day-chip-count">nuevo</span>
+            </button>
+          </div>
+
+          <article className="card top-12 editor-section">
+            <div className="row space-between wrap">
+              <h4>Información del día</h4>
+              <button className="btn btn-danger btn-mini" type="button" onClick={removeSelectedDay}>Borrar día</button>
+            </div>
+            <div className="grid-two top-8">
+              <Field label="Etiqueta corta (3-4 letras)" value={selectedDay.shortDay} onChange={(value) => updateSelectedDay("shortDay", value)} />
+              <Field label="Día completo" value={selectedDay.fullDay} onChange={(value) => updateSelectedDay("fullDay", value)} />
+              <Field label="Tipo (Fuerza, Cardio…)" value={selectedDay.type} onChange={(value) => updateSelectedDay("type", value)} />
+              <Field label="Título de la sesión" value={selectedDay.title} onChange={(value) => updateSelectedDay("title", value)} />
+            </div>
+            <label className="field top-8">
+              <span>Post-cardio (opcional)</span>
+              <input className="input" type="text" value={selectedDay.postCardio} onChange={(event) => updateSelectedDay("postCardio", event.target.value)} placeholder="Ej. 20 min cinta Z2 post-gym" />
+            </label>
+            <label className="field top-8">
+              <span>Protocolo cardio (si aplica)</span>
+              <textarea className="input" rows={3} value={selectedDay.cardioProtocol} onChange={(event) => updateSelectedDay("cardioProtocol", event.target.value)} placeholder="Detalle del protocolo de cardio…" />
+            </label>
+          </article>
+
+          <article className="card top-12 editor-section">
+            <div className="row space-between wrap">
+              <h4>Ejercicios</h4>
+              <span className="pill">{selectedDay.exercises.length}</span>
+            </div>
+
+            {selectedDay.exercises.length === 0 && (
+              <p className="muted top-8">Aún no hay ejercicios. Toca "Agregar ejercicio" para empezar.</p>
+            )}
+
+            <div className="stack gap-10 top-10">
+              {selectedDay.exercises.map((exercise, index) => (
+                <div key={exercise.id} className="exercise-edit-card">
+                  <div className="exercise-edit-head">
+                    <span className="exercise-edit-index">{index + 1}</span>
+                    <input
+                      className="input exercise-edit-name"
+                      type="text"
+                      value={exercise.name}
+                      onChange={(event) => updateExercise(exercise.id, "name", event.target.value)}
+                      placeholder="Nombre del ejercicio"
+                    />
+                  </div>
+
+                  <div className="exercise-edit-grid top-8">
+                    <Field label="Series" value={exercise.sets} onChange={(value) => updateExercise(exercise.id, "sets", value)} />
+                    <Field label="Reps" value={exercise.reps} onChange={(value) => updateExercise(exercise.id, "reps", value)} />
+                    <Field label="Descanso" value={exercise.rest} onChange={(value) => updateExercise(exercise.id, "rest", value)} />
+                  </div>
+                  <label className="field top-8">
+                    <span>Nota / técnica</span>
+                    <input className="input" type="text" value={exercise.note} onChange={(event) => updateExercise(exercise.id, "note", event.target.value)} placeholder="RIR 2, biserie, etc." />
+                  </label>
+
+                  <div className="exercise-edit-actions top-8">
+                    <button className="btn btn-soft btn-mini" type="button" onClick={() => moveExercise(exercise.id, -1)} disabled={index === 0} aria-label="Subir">↑</button>
+                    <button className="btn btn-soft btn-mini" type="button" onClick={() => moveExercise(exercise.id, 1)} disabled={index === selectedDay.exercises.length - 1} aria-label="Bajar">↓</button>
+                    <button className="btn btn-ghost btn-mini" type="button" onClick={() => duplicateExercise(exercise.id)}>Duplicar</button>
+                    <button className="btn btn-danger btn-mini" type="button" onClick={() => removeExercise(exercise.id)}>Borrar</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <button className="btn btn-primary btn-add-exercise top-12" type="button" onClick={addExercise}>
+              + Agregar ejercicio
+            </button>
+          </article>
+
+          <div className="editor-footer top-12">
+            <button className="btn btn-primary btn-large" type="button" onClick={() => setRoutineEditMode(false)}>
+              Guardar y volver
+            </button>
+            <p className="muted small top-6">Los cambios se guardan automáticamente mientras editas.</p>
+          </div>
         </section>
       )}
 
@@ -2506,132 +3049,8 @@ export default function App() {
         </section>
       )}
 
-      {tab === "dieta" && (
-        <section className="panel">
-          <div className="row space-between wrap">
-            <h2>Dieta</h2>
-            <button className="btn btn-ghost" type="button" onClick={() => setDietEditMode((prev) => !prev)}>
-              {dietEditMode ? "Cerrar edición" : "Editar dieta"}
-            </button>
-          </div>
 
-          <div className="stats-grid compact top-10">
-            <StatCard label="Calorías" value={`${state.settings.calories}`} meta="kcal/día" tone="accent" />
-            <StatCard label="Proteína" value={`${state.settings.protein}g`} meta="Objetivo" tone="good" />
-            <StatCard label="Carbos" value={`${state.settings.carbs}g`} meta="Objetivo" tone="warning" />
-            <StatCard label="Grasas" value={`${state.settings.fats}g`} meta="Objetivo" tone="warning" />
-          </div>
 
-          {dietEditMode && <button className="btn btn-primary top-10" type="button" onClick={addMeal}>Agregar bloque de comida</button>}
-
-          <div className="stack gap-12 top-12">
-            {state.dietMeals.map((meal) => (
-              <article key={meal.id} className="card">
-                {dietEditMode ? (
-                  <>
-                    <div className="grid-two">
-                      <Field label="Título" value={meal.title} onChange={(value) => updateMeal(meal.id, "title", value)} />
-                      <Field label="Horario" value={meal.time} onChange={(value) => updateMeal(meal.id, "time", value)} />
-                    </div>
-                    <label className="field top-8">
-                      <span>Nota</span>
-                      <textarea className="input" rows={2} value={meal.note} onChange={(event) => updateMeal(meal.id, "note", event.target.value)} />
-                    </label>
-                  </>
-                ) : (
-                  <>
-                    <h4>{meal.title}</h4>
-                    <p className="muted">{meal.time}</p>
-                    <p className="muted top-6">{meal.note}</p>
-                  </>
-                )}
-
-                <div className="stack gap-8 top-10">
-                  {meal.options.map((option) => (
-                    <div key={option.id} className="dish-card">
-                      {dietEditMode ? (
-                        <>
-                          <Field label="Platillo" value={option.name} onChange={(value) => updateDish(meal.id, option.id, "name", value)} />
-                          <div className="grid-four top-6">
-                            <Field label="kcal" type="number" value={option.kcal} onChange={(value) => updateDish(meal.id, option.id, "kcal", value)} />
-                            <Field label="Prot" type="number" value={option.protein} onChange={(value) => updateDish(meal.id, option.id, "protein", value)} />
-                            <Field label="Carbs" type="number" value={option.carbs} onChange={(value) => updateDish(meal.id, option.id, "carbs", value)} />
-                            <Field label="Fats" type="number" value={option.fats} onChange={(value) => updateDish(meal.id, option.id, "fats", value)} />
-                          </div>
-                          <label className="field top-6">
-                            <span>Descripción</span>
-                            <textarea className="input" rows={2} value={option.description} onChange={(event) => updateDish(meal.id, option.id, "description", event.target.value)} />
-                          </label>
-                          <button className="btn btn-danger top-6" type="button" onClick={() => removeDish(meal.id, option.id)}>Borrar platillo</button>
-                        </>
-                      ) : (
-                        <>
-                          <h5>{option.name}</h5>
-                          <p className="muted small">{option.kcal} kcal - P {option.protein}g - C {option.carbs}g - G {option.fats}g</p>
-                          <p className="muted top-6">{option.description}</p>
-                        </>
-                      )}
-                    </div>
-                  ))}
-                </div>
-
-                {dietEditMode && (
-                  <div className="row gap-8 wrap top-10">
-                    <button className="btn btn-primary" type="button" onClick={() => addDish(meal.id)}>Agregar platillo</button>
-                    <button className="btn btn-danger" type="button" onClick={() => removeMeal(meal.id)}>Borrar comida</button>
-                  </div>
-                )}
-              </article>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {tab === "suplementos" && (
-        <section className="panel">
-          <div className="row space-between wrap">
-            <h2>Suplementación</h2>
-            <button className="btn btn-ghost" type="button" onClick={() => setSupplementEditMode((prev) => !prev)}>
-              {supplementEditMode ? "Cerrar edición" : "Editar suplementación"}
-            </button>
-          </div>
-
-          <p className="muted top-8">Base precargada de tu plan original. Puedes agregar, editar o borrar libremente.</p>
-
-          {supplementEditMode && <button className="btn btn-primary top-10" type="button" onClick={addSupplement}>Agregar suplemento</button>}
-
-          <div className="stack gap-10 top-10">
-            {state.supplements.map((item) => (
-              <article key={item.id} className="card">
-                {supplementEditMode ? (
-                  <>
-                    <div className="grid-two">
-                      <Field label="Estado" value={item.status} onChange={(value) => updateSupplement(item.id, "status", value)} />
-                      <Field label="Suplemento" value={item.name} onChange={(value) => updateSupplement(item.id, "name", value)} />
-                      <Field label="Dosis" value={item.dose} onChange={(value) => updateSupplement(item.id, "dose", value)} />
-                      <Field label="Cuando" value={item.timing} onChange={(value) => updateSupplement(item.id, "timing", value)} />
-                    </div>
-                    <label className="field top-8">
-                      <span>Nota</span>
-                      <textarea className="input" rows={2} value={item.note} onChange={(event) => updateSupplement(item.id, "note", event.target.value)} />
-                    </label>
-                    <button className="btn btn-danger top-8" type="button" onClick={() => removeSupplement(item.id)}>Borrar suplemento</button>
-                  </>
-                ) : (
-                  <>
-                    <div className="row space-between wrap">
-                      <h4>{item.name}</h4>
-                      <span className="pill">{item.status}</span>
-                    </div>
-                    <p className="muted top-6">{item.dose} - {item.timing}</p>
-                    <p className="muted top-6">{item.note}</p>
-                  </>
-                )}
-              </article>
-            ))}
-          </div>
-        </section>
-      )}
 
       {tab === "config" && (
         <section className="panel">
@@ -2655,6 +3074,52 @@ export default function App() {
               <span>Nota de enfoque</span>
               <textarea className="input" rows={3} value={state.settings.focusNote} onChange={(event) => updateSetting("focusNote", event.target.value)} />
             </label>
+          </article>
+
+          <article className="card top-12">
+            <div className="row space-between wrap">
+              <div>
+                <h4>Usuarios</h4>
+                <p className="muted small top-6">Cada usuario tiene rutina, progreso y configuracion propia.</p>
+              </div>
+              <button className="btn btn-primary btn-mini" type="button" onClick={() => setProfileComposerOpen((prev) => !prev)}>
+                {profileComposerOpen ? "Cerrar" : "Agregar usuario"}
+              </button>
+            </div>
+
+            <div className="stack gap-8 top-10">
+              {profiles.map((profile) => (
+                <div key={profile.id} className={`profile-card ${profile.id === activeProfileId ? "selected" : ""}`}>
+                  <div>
+                    <strong>{profile.displayName}</strong>
+                    <p className="muted small top-6">{profile.goal} - {profile.daysPerWeek} dias - rutina {profile.routineSource}</p>
+                    <p className="muted small top-6">{profile.email || "Sin email"} {profile.pin ? "- PIN activo" : "- Sin PIN"}</p>
+                  </div>
+                  <div className="row gap-8 wrap">
+                    {profile.id !== activeProfileId && (
+                      <button className="btn btn-soft btn-mini" type="button" onClick={() => selectProfile(profile.id)}>
+                        Cambiar
+                      </button>
+                    )}
+                    <button className="btn btn-danger btn-mini" type="button" onClick={() => removeProfile(profile.id)}>
+                      Borrar
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {profileComposerOpen && (
+              <ProfileSetupCard
+                baseSnapshot={state}
+                onSave={(payload) => {
+                  createProfile(payload.record);
+                  setProfileComposerOpen(false);
+                }}
+                onCancel={() => setProfileComposerOpen(false)}
+                ctaLabel="Crear usuario"
+              />
+            )}
           </article>
 
           <article className="card top-12">

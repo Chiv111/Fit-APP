@@ -729,6 +729,25 @@ async function pushCloudState(payload, userId) {
 // ============================================================================
 // 7. EXERCISE HISTORY + REST PARSING
 // ============================================================================
+function normalizeAuthUiError(caught) {
+  const raw = String(caught?.message || caught?.error_description || caught?.msg || "").trim();
+  const lower = raw.toLowerCase();
+
+  if (!raw) {
+    return "No se pudo completar la conexión con Supabase.";
+  }
+
+  if (lower.includes("load failed") || lower.includes("fetch failed") || lower.includes("network request failed")) {
+    return "No se pudo conectar con Supabase. Revisa tu internet y, si estás en iPhone, prueba abrir la URL en Safari normal antes de volver a intentar.";
+  }
+
+  if (lower.includes("failed to fetch")) {
+    return "La conexión con Supabase falló antes de autenticarse. Recarga la app y vuelve a intentar.";
+  }
+
+  return raw;
+}
+
 function parseRestSeconds(raw) {
   if (!raw || typeof raw !== "string") return 90;
   const text = raw.toLowerCase();
@@ -882,7 +901,7 @@ function AuthScreen({ supabaseConfigured }) {
         }
       }
     } catch (caught) {
-      setError(caught?.message || "Error inesperado.");
+      setError(normalizeAuthUiError(caught));
     } finally {
       setSubmitting(false);
     }
@@ -896,14 +915,18 @@ function AuthScreen({ supabaseConfigured }) {
       setError("Escribe tu correo arriba para enviar el link de recuperación.");
       return;
     }
-    const { error: authError } = await supabase.auth.resetPasswordForEmail(trimmedEmail, {
-      redirectTo: SUPABASE_AUTH_REDIRECT_URL || window.location.origin,
-    });
-    if (authError) {
-      setError(authError.message || "No se pudo enviar el correo.");
-      return;
+    try {
+      const { error: authError } = await supabase.auth.resetPasswordForEmail(trimmedEmail, {
+        redirectTo: SUPABASE_AUTH_REDIRECT_URL || window.location.origin,
+      });
+      if (authError) {
+        setError(authError.message || "No se pudo enviar el correo.");
+        return;
+      }
+      setNotice("Te enviamos un correo para restablecer la contraseña.");
+    } catch (caught) {
+      setError(normalizeAuthUiError(caught));
     }
-    setNotice("Te enviamos un correo para restablecer la contraseña.");
   };
 
   if (!supabaseConfigured) {
@@ -945,6 +968,8 @@ function AuthScreen({ supabaseConfigured }) {
             ? "Entra con tu correo y contraseña. Tu progreso se sincroniza automáticamente."
             : "Registra tu correo y contraseña. Cada cuenta tiene su propia rutina y progreso."}
         </p>
+
+        <p className="tiny-note">Si aparece "Load failed", normalmente es una falla de red entre el navegador y Supabase.</p>
 
         <div className="row gap-8 top-6 auth-mode-row">
           <button

@@ -1,14 +1,20 @@
-﻿{
-  "name": "LOCK IN",
-  "short_name": "LOCK IN",
-  "description": "App personal de progreso gym de Sebastian",
+{
+  "name": "Anvil",
+  "short_name": "Anvil",
+  "description": "Registra tu progreso en el gym: pesos, series y reps.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#060b14",
-  "theme_color": "#060b14",
+  "background_color": "#050506",
+  "theme_color": "#0e1218",
   "orientation": "portrait",
   "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
     {
       "src": "/icons/icon-192.png",
       "sizes": "192x192",

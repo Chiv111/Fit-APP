@@ -104,23 +104,23 @@ function pickTemplate(goal, daysPerWeek, equipment) {
   const templates = {
     fat_loss: [
       {
-        title: "Full Body A",
+        title: "Cuerpo completo A",
         exercises: [
-          makeExercise(home ? "Goblet squat" : "Back squat", 4, "6-8", "120s", "Base de fuerza"),
-          makeExercise(home ? "Push-up" : "Bench press", 4, "8-10", "90s", "Controlado"),
-          makeExercise(home ? "One-arm row" : "Chest supported row", 4, "8-10", "90s", "Espalda alta"),
-          makeExercise("Romanian deadlift", 3, "8-10", "120s", "Posterior"),
-          makeExercise("Plank", 3, "40-60s", "45s", "Core"),
+          makeExercise(home ? "Sentadilla con mancuerna" : "Sentadilla con barra", 4, "6-8", "120s", "Base de fuerza"),
+          makeExercise(home ? "Lagartija" : "Press banca", 4, "8-10", "90s", "Controlado"),
+          makeExercise(home ? "Remo a una mano" : "Remo con soporte", 4, "8-10", "90s", "Espalda alta"),
+          makeExercise("Peso muerto rumano", 3, "8-10", "120s", "Posterior"),
+          makeExercise("Plancha", 3, "40-60s", "45s", "Core"),
         ],
       },
       {
-        title: "Full Body B",
+        title: "Cuerpo completo B",
         exercises: [
-          makeExercise(home ? "Bulgarian split squat" : "Leg press", 4, "10-12", "90s", "Pierna"),
-          makeExercise(home ? "Floor press" : "Incline dumbbell press", 4, "8-10", "90s", "Pecho superior"),
-          makeExercise(home ? "Band pulldown" : "Lat pulldown", 4, "10-12", "75s", "Dorsal"),
+          makeExercise(home ? "Sentadilla búlgara" : "Prensa", 4, "10-12", "90s", "Pierna"),
+          makeExercise(home ? "Press en piso" : "Press inclinado con mancuernas", 4, "8-10", "90s", "Pecho superior"),
+          makeExercise(home ? "Jalón con banda" : "Jalón al pecho", 4, "10-12", "75s", "Dorsal"),
           makeExercise("Hip thrust", 3, "10-12", "90s", "Gluteo"),
-          makeExercise("Farmer carry", 3, "30m", "60s", "Acondicionamiento"),
+          makeExercise("Caminata con peso", 3, "30m", "60s", "Acondicionamiento"),
         ],
       },
       {
@@ -133,62 +133,62 @@ function pickTemplate(goal, daysPerWeek, equipment) {
     ],
     muscle_gain: [
       {
-        title: "Push",
+        title: "Empuje",
         exercises: [
-          makeExercise(home ? "Dumbbell press" : "Barbell bench press", 4, "6-8", "120s", "Top set + backoffs"),
-          makeExercise(home ? "Shoulder press" : "Seated shoulder press", 4, "8-10", "90s", "Hombro"),
-          makeExercise(home ? "Push-up deficit" : "Incline machine press", 3, "10-12", "75s", "Pecho"),
-          makeExercise("Lateral raise", 4, "12-15", "45s", "Control"),
-          makeExercise("Triceps extension", 3, "12-15", "45s", "Bombeo"),
+          makeExercise(home ? "Press con mancuernas" : "Press banca con barra", 4, "6-8", "120s", "Serie principal y series de apoyo"),
+          makeExercise(home ? "Press hombro" : "Press hombro sentado", 4, "8-10", "90s", "Hombro"),
+          makeExercise(home ? "Lagartija con elevación" : "Press inclinado en máquina", 3, "10-12", "75s", "Pecho"),
+          makeExercise("Elevación lateral", 4, "12-15", "45s", "Control"),
+          makeExercise("Extensión de tríceps", 3, "12-15", "45s", "Bombeo"),
         ],
       },
       {
-        title: "Pull",
+        title: "Jalón",
         exercises: [
-          makeExercise(home ? "Pull-up / band row" : "Weighted pull-up", 4, "6-8", "120s", "Vertical"),
-          makeExercise(home ? "Chest supported DB row" : "T-bar row", 4, "8-10", "90s", "Horizontal"),
-          makeExercise("Pullover / straight-arm pulldown", 3, "10-12", "60s", "Dorsal"),
-          makeExercise("Rear delt fly", 3, "12-15", "45s", "Posterior"),
-          makeExercise("Biceps curl", 3, "10-12", "45s", "Biceps"),
+          makeExercise(home ? "Dominada / remo con banda" : "Dominada con peso", 4, "6-8", "120s", "Vertical"),
+          makeExercise(home ? "Remo con mancuernas" : "Remo en barra T", 4, "8-10", "90s", "Horizontal"),
+          makeExercise("Pullover / jalón con brazos rectos", 3, "10-12", "60s", "Dorsal"),
+          makeExercise("Pájaros", 3, "12-15", "45s", "Posterior"),
+          makeExercise("Curl bíceps", 3, "10-12", "45s", "Biceps"),
         ],
       },
       {
-        title: "Legs",
+        title: "Pierna",
         exercises: [
-          makeExercise(home ? "Goblet squat" : "Hack squat", 4, "6-8", "120s", "Cuadri"),
-          makeExercise("Romanian deadlift", 4, "8-10", "120s", "Posterior"),
-          makeExercise(home ? "Walking lunge" : "Leg extension", 3, "10-12", "75s", "Cuadri"),
-          makeExercise(home ? "Hip thrust" : "Leg curl", 3, "10-12", "75s", "Femoral"),
-          makeExercise("Calf raise", 4, "12-15", "45s", "Pantorrilla"),
+          makeExercise(home ? "Sentadilla con mancuerna" : "Sentadilla hack", 4, "6-8", "120s", "Cuadri"),
+          makeExercise("Peso muerto rumano", 4, "8-10", "120s", "Posterior"),
+          makeExercise(home ? "Desplante caminando" : "Extensión de pierna", 3, "10-12", "75s", "Cuadri"),
+          makeExercise(home ? "Hip thrust" : "Curl femoral", 3, "10-12", "75s", "Femoral"),
+          makeExercise("Elevación de pantorrilla", 4, "12-15", "45s", "Pantorrilla"),
         ],
       },
     ],
     recomp: [
       {
-        title: "Upper",
+        title: "Torso",
         exercises: [
-          makeExercise(home ? "Incline dumbbell press" : "Incline barbell press", 4, "6-8", "120s", "Empuje"),
-          makeExercise(home ? "Pull-up" : "Lat pulldown", 4, "8-10", "90s", "Tiron"),
-          makeExercise(home ? "Dumbbell shoulder press" : "Machine shoulder press", 3, "8-10", "90s", "Hombro"),
-          makeExercise(home ? "One-arm row" : "Cable row", 3, "10-12", "75s", "Espalda"),
-          makeExercise("Arms superset", 3, "12-15", "45s", "Biceps + triceps"),
+          makeExercise(home ? "Press inclinado con mancuernas" : "Press inclinado con barra", 4, "6-8", "120s", "Empuje"),
+          makeExercise(home ? "Dominada" : "Jalón al pecho", 4, "8-10", "90s", "Tirón"),
+          makeExercise(home ? "Press hombro con mancuernas" : "Press hombro en máquina", 3, "8-10", "90s", "Hombro"),
+          makeExercise(home ? "Remo a una mano" : "Remo en polea", 3, "10-12", "75s", "Espalda"),
+          makeExercise("Brazos combinados", 3, "12-15", "45s", "Biceps + triceps"),
         ],
       },
       {
-        title: "Lower",
+        title: "Pierna",
         exercises: [
-          makeExercise(home ? "Split squat" : "Back squat", 4, "6-8", "120s", "Pierna"),
-          makeExercise("Romanian deadlift", 4, "8-10", "120s", "Posterior"),
-          makeExercise(home ? "Step-up" : "Leg press", 3, "10-12", "75s", "Cuadri"),
+          makeExercise(home ? "Sentadilla dividida" : "Sentadilla con barra", 4, "6-8", "120s", "Pierna"),
+          makeExercise("Peso muerto rumano", 4, "8-10", "120s", "Posterior"),
+          makeExercise(home ? "Subida a banco" : "Prensa", 3, "10-12", "75s", "Cuadri"),
           makeExercise("Hip thrust", 3, "10-12", "75s", "Gluteo"),
-          makeExercise("Abs circuit", 3, "12-15", "45s", "Core"),
+          makeExercise("Circuito de abdomen", 3, "12-15", "45s", "Core"),
         ],
       },
       {
-        title: "Cardio Z2",
+        title: "Cardio suave",
         type: "Cardio",
-        postCardio: "Sesion principal",
-        cardioProtocol: "35-45 min en zona 2. Debes poder mantener conversacion corta.",
+        postCardio: "Sesión principal",
+        cardioProtocol: "35-45 min a ritmo suave. Debes poder mantener una conversación corta.",
         exercises: [],
       },
     ],
@@ -203,7 +203,7 @@ function pickTemplate(goal, daysPerWeek, equipment) {
       makeDay(index, {
         title: template.title,
         type: template.type || "Fuerza",
-        postCardio: template.postCardio || "10-20 min Z2 opcional",
+        postCardio: template.postCardio || "10-20 min suave opcional",
         cardioProtocol: template.cardioProtocol || "",
         exercises: template.exercises,
       })
@@ -222,7 +222,7 @@ function parseJsonRoutine(text) {
   if (Array.isArray(parsed)) return normalizeRoutineDays(parsed);
   if (Array.isArray(parsed?.routine)) return normalizeRoutineDays(parsed.routine);
   if (Array.isArray(parsed?.days)) return normalizeRoutineDays(parsed.days);
-  throw new Error("JSON sin rutina valida.");
+  throw new Error("No encontramos una rutina válida en el archivo.");
 }
 
 function parseCsvRoutine(text) {
@@ -231,11 +231,11 @@ function parseCsvRoutine(text) {
     .map((line) => line.trim())
     .filter(Boolean);
 
-  if (rows.length < 2) throw new Error("CSV sin filas.");
+  if (rows.length < 2) throw new Error("El archivo no tiene suficientes filas.");
   const headers = rows[0].split(",").map((cell) => safeSlug(cell));
   const headerIndex = Object.fromEntries(headers.map((header, index) => [header, index]));
   if (headerIndex.day === undefined || headerIndex.exercise === undefined) {
-    throw new Error("CSV debe incluir columnas day y exercise.");
+    throw new Error("No pudimos reconocer el día y el ejercicio en el archivo.");
   }
 
   const grouped = new Map();
@@ -341,7 +341,7 @@ function parseTextRoutine(text) {
 
 export function parseRoutineImport(text, fileName = "") {
   const raw = String(text || "").trim();
-  if (!raw) throw new Error("La rutina esta vacia.");
+  if (!raw) throw new Error("La rutina está vacía.");
 
   const extension = String(fileName || "").split(".").pop()?.toLowerCase() || "";
 

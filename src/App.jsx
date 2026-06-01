@@ -21,6 +21,7 @@ const STATE_KEY_PREFIX = "fitapp_state_v4";
 const BACKUP_KEY_PREFIX = "fitapp_backups_v4";
 const DRAFT_KEY_PREFIX = "fitapp_drafts_v4";
 const SYNC_QUEUE_KEY_PREFIX = "fitapp_sync_queue_v4";
+const AUTH_LOCAL_MODE_KEY = "fitapp_auth_local_mode_v1";
 const LEGACY_STATE_KEYS = ["lockin_state_v3", "lockin_state_v2", "lockin_state_v1", "fit_app_state_v6", "fit_app_state_v5"];
 const LEGACY_BACKUP_KEYS = ["lockin_backups_v3", "lockin_backups_v2", "lockin_backups_v1"];
 const LOCAL_SCOPE = "local";
@@ -199,7 +200,7 @@ const DEFAULT_PACKAGES = [
     exercises: [
       { id: "px_pecho_1", name: "Press banca", sets: "4", reps: "6-10", rest: "120s", note: "" },
       { id: "px_pecho_2", name: "Press inclinado mancuernas", sets: "3", reps: "8-12", rest: "90s", note: "" },
-      { id: "px_pecho_3", name: "Aperturas / Flys", sets: "3", reps: "10-12", rest: "60s", note: "" },
+      { id: "px_pecho_3", name: "Aperturas", sets: "3", reps: "10-12", rest: "60s", note: "" },
     ],
   },
   {
@@ -220,7 +221,7 @@ const DEFAULT_PACKAGES = [
     exercises: [
       { id: "px_hombro_1", name: "Press militar", sets: "3", reps: "6-10", rest: "90s", note: "" },
       { id: "px_hombro_2", name: "Elevaciones laterales", sets: "3", reps: "10-15", rest: "60s", note: "" },
-      { id: "px_hombro_3", name: "Pájaros / Rear delts", sets: "3", reps: "10-15", rest: "60s", note: "" },
+      { id: "px_hombro_3", name: "Pájaros / Deltoide posterior", sets: "3", reps: "10-15", rest: "60s", note: "" },
     ],
   },
   {
@@ -353,7 +354,7 @@ const DEFAULT_ROUTINE = [
     shortDay: "DOM",
     fullDay: "Domingo",
     type: "Cardio",
-    title: "Cardio Z2",
+    title: "Cardio suave",
     postCardio: "",
     cardioProtocol: "30-40 min ritmo conversacional",
     packageIds: [],
@@ -375,6 +376,74 @@ const DEFAULT_STATE = {
 // ============================================================================
 // 4. STATE MODEL + NORMALIZATION
 // ============================================================================
+const USER_TEXT_REPLACEMENTS = {
+  "Aperturas / Flys": "Aperturas",
+  "Pájaros / Rear delts": "Pájaros / Deltoide posterior",
+  "Cardio Z2": "Cardio suave",
+  "Full Body A": "Cuerpo completo A",
+  "Full Body B": "Cuerpo completo B",
+  Push: "Empuje",
+  Pull: "Jalón",
+  Legs: "Pierna",
+  Upper: "Torso",
+  Lower: "Pierna",
+  "Top set + backoffs": "Serie principal y series de apoyo",
+  "10-20 min Z2 opcional": "10-20 min suave opcional",
+  "Sesion principal": "Sesión principal",
+  "35-45 min en zona 2. Debes poder mantener conversacion corta.": "35-45 min a ritmo suave. Debes poder mantener una conversación corta.",
+  "Goblet squat": "Sentadilla con mancuerna",
+  "Back squat": "Sentadilla con barra",
+  "Push-up": "Lagartija",
+  "Bench press": "Press banca",
+  "One-arm row": "Remo a una mano",
+  "Chest supported row": "Remo con soporte",
+  "Romanian deadlift": "Peso muerto rumano",
+  Plank: "Plancha",
+  "Bulgarian split squat": "Sentadilla búlgara",
+  "Leg press": "Prensa",
+  "Floor press": "Press en piso",
+  "Incline dumbbell press": "Press inclinado con mancuernas",
+  "Band pulldown": "Jalón con banda",
+  "Lat pulldown": "Jalón al pecho",
+  "Farmer carry": "Caminata con peso",
+  "Dumbbell press": "Press con mancuernas",
+  "Barbell bench press": "Press banca con barra",
+  "Shoulder press": "Press hombro",
+  "Seated shoulder press": "Press hombro sentado",
+  "Push-up deficit": "Lagartija con elevación",
+  "Incline machine press": "Press inclinado en máquina",
+  "Lateral raise": "Elevación lateral",
+  "Triceps extension": "Extensión de tríceps",
+  "Pull-up / band row": "Dominada / remo con banda",
+  "Weighted pull-up": "Dominada con peso",
+  "Chest supported DB row": "Remo con mancuernas",
+  "T-bar row": "Remo en barra T",
+  "Pullover / straight-arm pulldown": "Pullover / jalón con brazos rectos",
+  "Rear delt fly": "Pájaros",
+  "Biceps curl": "Curl bíceps",
+  "Hack squat": "Sentadilla hack",
+  "Walking lunge": "Desplante caminando",
+  "Leg extension": "Extensión de pierna",
+  "Leg curl": "Curl femoral",
+  "Calf raise": "Elevación de pantorrilla",
+  "Incline barbell press": "Press inclinado con barra",
+  "Pull-up": "Dominada",
+  "Dumbbell shoulder press": "Press hombro con mancuernas",
+  "Machine shoulder press": "Press hombro en máquina",
+  "Cable row": "Remo en polea",
+  "Arms superset": "Brazos combinados",
+  "Split squat": "Sentadilla dividida",
+  "Step-up": "Subida a banco",
+  "Abs circuit": "Circuito de abdomen",
+  Tiron: "Tirón",
+};
+
+function cleanUserText(value) {
+  if (typeof value !== "string") return value;
+  const replacement = USER_TEXT_REPLACEMENTS[value.trim()];
+  return replacement || value;
+}
+
 function parseJson(raw, fallback) {
   try {
     const parsed = JSON.parse(raw);
@@ -484,11 +553,11 @@ function normalizeSettings(candidate) {
 function normalizeExercise(exercise, exIndex) {
   return {
     id: exercise.id || makeId(`ex${exIndex}`),
-    name: exercise.name || "Nuevo ejercicio",
+    name: cleanUserText(exercise.name || "Nuevo ejercicio"),
     sets: exercise.sets || "3",
     reps: exercise.reps || "8-10",
     rest: exercise.rest || "90s",
-    note: exercise.note || "",
+    note: cleanUserText(exercise.note || ""),
   };
 }
 
@@ -505,11 +574,11 @@ function normalizeRoutine(candidate) {
     return {
       id: day.id || makeId(`day${dayIndex}`),
       shortDay: day.shortDay || `D${dayIndex + 1}`,
-      fullDay: day.fullDay || `Día ${dayIndex + 1}`,
-      type: day.type || "Fuerza",
-      title: day.title || "Sesión",
-      postCardio: day.postCardio || "",
-      cardioProtocol: day.cardioProtocol || "",
+      fullDay: cleanUserText(day.fullDay || `Día ${dayIndex + 1}`),
+      type: cleanUserText(day.type || "Fuerza"),
+      title: cleanUserText(day.title || "Sesión"),
+      postCardio: cleanUserText(day.postCardio || ""),
+      cardioProtocol: cleanUserText(day.cardioProtocol || ""),
       packageIds,
       customExercises,
     };
@@ -522,7 +591,7 @@ function normalizePackages(candidate) {
     .filter((pkg) => pkg && typeof pkg === "object")
     .map((pkg, pkgIndex) => ({
       id: pkg.id || makeId(`pkg${pkgIndex}`),
-      name: String(pkg.name || `Paquete ${pkgIndex + 1}`).trim(),
+      name: cleanUserText(String(pkg.name || `Paquete ${pkgIndex + 1}`).trim()),
       color: typeof pkg.color === "string" && pkg.color.trim() ? pkg.color.trim() : "#9aa3b2",
       exercises: Array.isArray(pkg.exercises) ? pkg.exercises.map(normalizeExercise) : [],
     }));
@@ -731,18 +800,39 @@ async function pushCloudState(payload, userId) {
 // ============================================================================
 function normalizeAuthUiError(caught) {
   const raw = String(caught?.message || caught?.error_description || caught?.msg || "").trim();
+  const code = String(caught?.code || caught?.error_code || caught?.status || "").trim().toLowerCase();
   const lower = raw.toLowerCase();
 
   if (!raw) {
-    return "No se pudo completar la conexión con Supabase.";
+    return "No se pudo completar la conexión.";
+  }
+
+  if (code === "invalid_credentials" || lower.includes("invalid login credentials")) {
+    return "Correo o contraseña incorrectos. Si acabas de crear tu cuenta, confirma tu correo antes de entrar.";
+  }
+
+  if (code === "email_not_confirmed" || lower.includes("email not confirmed") || lower.includes("not confirmed")) {
+    return "Falta confirmar tu correo. Revisa tu bandeja o reenvía la confirmación.";
+  }
+
+  if (code === "signup_disabled" || lower.includes("signups not allowed") || lower.includes("signup is disabled")) {
+    return "No se pueden crear cuentas nuevas en este momento.";
+  }
+
+  if (lower.includes("user already registered") || lower.includes("already registered")) {
+    return "Esta cuenta ya existe. Inicia sesión o recupera tu contraseña.";
+  }
+
+  if (lower.includes("rate limit") || lower.includes("too many requests")) {
+    return "Demasiados intentos. Espera un momento y vuelve a intentar.";
   }
 
   if (lower.includes("load failed") || lower.includes("fetch failed") || lower.includes("network request failed")) {
-    return "No se pudo conectar con Supabase. Revisa tu internet y, si estás en iPhone, prueba abrir la URL en Safari normal antes de volver a intentar.";
+    return "No se pudo conectar. Revisa tu internet y vuelve a intentar.";
   }
 
   if (lower.includes("failed to fetch")) {
-    return "La conexión con Supabase falló antes de autenticarse. Recarga la app y vuelve a intentar.";
+    return "La conexión falló antes de iniciar sesión. Recarga la app y vuelve a intentar.";
   }
 
   return raw;
@@ -849,12 +939,13 @@ function MiniLineChart({ points, color = "#d83b2d", height = 120 }) {
   );
 }
 
-function AuthScreen({ supabaseConfigured }) {
+function AuthScreen({ supabaseConfigured, authMessage = "", onContinueLocal }) {
   const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [resendingConfirmation, setResendingConfirmation] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
 
@@ -882,7 +973,7 @@ function AuthScreen({ supabaseConfigured }) {
           password,
         });
         if (authError) {
-          setError(authError.message || "No se pudo iniciar sesión.");
+          setError(normalizeAuthUiError(authError));
         }
       } else {
         const { data, error: authError } = await supabase.auth.signUp({
@@ -894,7 +985,7 @@ function AuthScreen({ supabaseConfigured }) {
           },
         });
         if (authError) {
-          setError(authError.message || "No se pudo crear la cuenta.");
+          setError(normalizeAuthUiError(authError));
         } else if (!data.session) {
           setNotice("Cuenta creada. Revisa tu correo para confirmar y luego inicia sesión.");
           setMode("login");
@@ -920,12 +1011,42 @@ function AuthScreen({ supabaseConfigured }) {
         redirectTo: SUPABASE_AUTH_REDIRECT_URL || window.location.origin,
       });
       if (authError) {
-        setError(authError.message || "No se pudo enviar el correo.");
+        setError(normalizeAuthUiError(authError));
         return;
       }
       setNotice("Te enviamos un correo para restablecer la contraseña.");
     } catch (caught) {
       setError(normalizeAuthUiError(caught));
+    }
+  };
+
+  const onResendConfirmation = async () => {
+    setError("");
+    setNotice("");
+    const trimmedEmail = email.trim().toLowerCase();
+    if (!trimmedEmail || !trimmedEmail.includes("@")) {
+      setError("Escribe tu correo arriba para reenviar la confirmación.");
+      return;
+    }
+
+    setResendingConfirmation(true);
+    try {
+      const { error: authError } = await supabase.auth.resend({
+        type: "signup",
+        email: trimmedEmail,
+        options: {
+          emailRedirectTo: SUPABASE_AUTH_REDIRECT_URL || window.location.origin,
+        },
+      });
+      if (authError) {
+        setError(normalizeAuthUiError(authError));
+        return;
+      }
+      setNotice("Te reenviamos el correo de confirmación.");
+    } catch (caught) {
+      setError(normalizeAuthUiError(caught));
+    } finally {
+      setResendingConfirmation(false);
     }
   };
 
@@ -937,17 +1058,18 @@ function AuthScreen({ supabaseConfigured }) {
             <AnvilLogo size={56} />
             <div>
               <p className="gate-tag">ANVIL</p>
-              <h1>Falta conectar Supabase</h1>
+              <h1>Cuenta no disponible</h1>
             </div>
           </div>
           <p className="gate-sub">
-            Para que cada persona tenga su cuenta necesitas configurar las claves de Supabase en el archivo <code>.env</code>:
+            En este momento no se puede iniciar sesión. Puedes seguir usando tus datos en este dispositivo.
           </p>
-          <ul className="clean-list">
-            <li><code>VITE_SUPABASE_URL</code></li>
-            <li><code>VITE_SUPABASE_ANON_KEY</code></li>
-          </ul>
-          <p className="tiny-note">Mientras tanto puedes usar la app en modo local desde otra pestaña.</p>
+          {authMessage && <p className="error-text">{authMessage}</p>}
+          {onContinueLocal && (
+            <button className="btn btn-primary btn-large top-10" type="button" onClick={onContinueLocal}>
+              Usar este dispositivo
+            </button>
+          )}
         </div>
       </div>
     );
@@ -965,12 +1087,11 @@ function AuthScreen({ supabaseConfigured }) {
         </div>
         <p className="gate-sub">
           {isLogin
-            ? "Entra con tu correo y contraseña. Tu progreso se sincroniza automáticamente."
+            ? "Entra con tu correo y contraseña. Tu progreso se guarda automáticamente."
             : "Registra tu correo y contraseña. Cada cuenta tiene su propia rutina y progreso."}
         </p>
-
-        <p className="tiny-note">Si aparece "Load failed", normalmente es una falla de red entre el navegador y Supabase.</p>
-
+        {authMessage && <p className="error-text">{authMessage}</p>}
+        <p className="tiny-note">Las cuentas nuevas deben confirmarse desde el correo antes de entrar.</p>
         <div className="row gap-8 top-6 auth-mode-row">
           <button
             type="button"
@@ -1023,8 +1144,18 @@ function AuthScreen({ supabaseConfigured }) {
         </form>
 
         {isLogin && (
-          <button type="button" className="btn btn-ghost btn-mini top-8" onClick={onResetPassword}>
-            Olvidé mi contraseña
+          <div className="row gap-8 wrap top-8">
+            <button type="button" className="btn btn-ghost btn-mini" onClick={onResetPassword}>
+              Olvidé mi contraseña
+            </button>
+            <button type="button" className="btn btn-soft btn-mini" onClick={onResendConfirmation} disabled={resendingConfirmation}>
+              {resendingConfirmation ? "Enviando..." : "Reenviar confirmación"}
+            </button>
+          </div>
+        )}
+        {onContinueLocal && (
+          <button type="button" className="btn btn-ghost btn-large top-10" onClick={onContinueLocal}>
+            Entrar sin cuenta
           </button>
         )}
       </div>
@@ -1325,13 +1456,13 @@ function TimerModal({ open, onClose, timer, setTimer, now }) {
                 </p>
                 <div className="timer-presets">
                   <button type="button" className="btn btn-ghost" onClick={() => setTimer((p) => ({ ...p, intervalWork: 30, intervalRest: 10, intervalRounds: 8 }))}>
-                    Tabata 30/10×8
+                    Rápido 30/10×8
                   </button>
                   <button type="button" className="btn btn-ghost" onClick={() => setTimer((p) => ({ ...p, intervalWork: 60, intervalRest: 30, intervalRounds: 10 }))}>
-                    HIIT 60/30×10
+                    Fuerte 60/30×10
                   </button>
                   <button type="button" className="btn btn-ghost" onClick={() => setTimer((p) => ({ ...p, intervalWork: 60, intervalRest: 0, intervalRounds: 10 }))}>
-                    EMOM 60×10
+                    Cada minuto 60×10
                   </button>
                 </div>
               </>
@@ -1447,7 +1578,7 @@ function ExerciseLogItem({
         </div>
         <div className="exercise-head-status">
           {hasNote && <span className="note-dot" title="Tiene nota">📝</span>}
-          <span className={`pill ${setsCount > 0 ? "pill-good" : ""}`}>{setsCount} set{setsCount === 1 ? "" : "s"}</span>
+          <span className={`pill ${setsCount > 0 ? "pill-good" : ""}`}>{setsCount} serie{setsCount === 1 ? "" : "s"}</span>
           <span className="chevron" aria-hidden="true">{expanded ? "▴" : "▾"}</span>
         </div>
       </button>
@@ -1490,13 +1621,13 @@ function ExerciseLogItem({
               className="input"
               type="number"
               inputMode="numeric"
-              placeholder="reps"
+              placeholder="rep."
               step="1"
               value={reps}
               onChange={(event) => setReps(event.target.value)}
             />
             <button className="btn btn-primary" type="button" onClick={commitSet}>
-              Guardar set
+              Guardar serie
             </button>
           </div>
 
@@ -1522,12 +1653,12 @@ function ExerciseLogItem({
                   setReps(String(latestCurrentSet.reps));
                 }}
               >
-                Repetir set
+                Repetir serie
               </button>
             )}
           </div>
 
-          {justSaved && <p className="trend top-8">✓ Set guardado</p>}
+          {justSaved && <p className="trend top-8">✓ Serie guardada</p>}
 
           <div className="tools-block top-10">
             <button
@@ -1537,14 +1668,14 @@ function ExerciseLogItem({
             >
               <span>🧮 Herramientas</span>
               {oneRmBest > 0 && !showTools && (
-                <span className="tools-summary">1RM est. {oneRmBest}kg</span>
+                <span className="tools-summary">Máx. aprox. {oneRmBest}kg</span>
               )}
               <span className="chevron">{showTools ? "▴" : "▾"}</span>
             </button>
             {showTools && (
               <div className="tools-body">
                 <div className="tool-card">
-                  <p className="tool-label">1RM estimado (Epley)</p>
+                  <p className="tool-label">Peso máximo estimado</p>
                   <p className="tool-value">
                     {oneRmBest > 0 ? `${oneRmBest}kg` : "—"}
                   </p>
@@ -1552,7 +1683,7 @@ function ExerciseLogItem({
                     {oneRmCurrent > 0 && `Sesión actual: ${oneRmCurrent}kg`}
                     {oneRmCurrent > 0 && oneRmPrevious > 0 && " · "}
                     {oneRmPrevious > 0 && `Anterior: ${oneRmPrevious}kg`}
-                    {oneRmBest === 0 && "Captura un set para estimar"}
+                    {oneRmBest === 0 && "Captura una serie para estimar"}
                   </p>
                 </div>
 
@@ -1602,7 +1733,7 @@ function ExerciseLogItem({
 
           <div className="note-block top-12">
             <label className="field">
-              <span>📝 Nota de hoy (cómo te sentiste, dolor, técnica, peso usado...)</span>
+              <span>📝 Nota de hoy (cómo te sentiste, dolor, peso usado...)</span>
               <textarea
                 className="input note-textarea"
                 rows={2}
@@ -1627,15 +1758,19 @@ export default function App() {
   // Auth state
   const [authReady, setAuthReady] = useState(!SUPABASE_CONFIGURED);
   const [authSession, setAuthSession] = useState(null);
+  const [authError, setAuthError] = useState("");
+  const [localMode, setLocalMode] = useState(() => SUPABASE_CONFIGURED && safeLocalGet(AUTH_LOCAL_MODE_KEY) === "true");
   const userId = authSession?.user?.id || null;
-  const scope = SUPABASE_CONFIGURED ? (userId || null) : LOCAL_SCOPE;
+  const hasCloudAccount = SUPABASE_CONFIGURED && Boolean(userId);
+  const usingLocalMode = SUPABASE_CONFIGURED && !userId && localMode;
+  const scope = hasCloudAccount ? userId : (!SUPABASE_CONFIGURED || usingLocalMode ? LOCAL_SCOPE : null);
 
   // App state
   const [state, setState] = useState(() =>
-    SUPABASE_CONFIGURED ? normalizeState(DEFAULT_STATE) : loadLocalState(LOCAL_SCOPE)
+    SUPABASE_CONFIGURED && !localMode ? normalizeState(DEFAULT_STATE) : loadLocalState(LOCAL_SCOPE)
   );
   const [draftLogs, setDraftLogs] = useState(() =>
-    SUPABASE_CONFIGURED ? {} : loadDrafts(LOCAL_SCOPE)
+    SUPABASE_CONFIGURED && !localMode ? {} : loadDrafts(LOCAL_SCOPE)
   );
   const [saveMeta, setSaveMeta] = useState({ ok: true, error: null, backupCount: 0, lastSavedAt: null, lastBackupAt: null });
   const [cloudMeta, setCloudMeta] = useState({
@@ -1691,13 +1826,28 @@ export default function App() {
   useEffect(() => {
     if (!SUPABASE_CONFIGURED || !supabase) return undefined;
     let mounted = true;
-    supabase.auth.getSession().then(({ data }) => {
-      if (!mounted) return;
-      setAuthSession(data?.session || null);
-      setAuthReady(true);
-    });
+    supabase.auth.getSession()
+      .then(({ data, error }) => {
+        if (!mounted) return;
+        if (error) setAuthError(normalizeAuthUiError(error));
+        else setAuthError("");
+        setAuthSession(data?.session || null);
+      })
+      .catch((caught) => {
+        if (!mounted) return;
+        setAuthError(normalizeAuthUiError(caught));
+        setAuthSession(null);
+      })
+      .finally(() => {
+        if (mounted) setAuthReady(true);
+      });
     const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
       setAuthSession(session || null);
+      if (session) {
+        setAuthError("");
+        setLocalMode(false);
+        safeLocalRemove(AUTH_LOCAL_MODE_KEY);
+      }
     });
     return () => {
       mounted = false;
@@ -1732,7 +1882,7 @@ export default function App() {
       const cloud = await fetchCloudState(userId);
       if (cancelled) return;
       if (!cloud.ok) {
-        setCloudMeta((prev) => ({ ...prev, enabled: true, syncing: false, error: cloud.reason || "Error de nube" }));
+        setCloudMeta((prev) => ({ ...prev, enabled: true, syncing: false, error: cloud.reason || "No se pudieron actualizar tus datos." }));
         setCloudReady(true);
         return;
       }
@@ -1802,7 +1952,7 @@ export default function App() {
           return;
         }
         if (!isOnline) {
-          setCloudMeta((prev) => ({ ...prev, syncing: false, error: "Sin internet. Pendiente en cola.", queueCount: 1 }));
+          setCloudMeta((prev) => ({ ...prev, syncing: false, error: "Sin internet. Se guardará al reconectar.", queueCount: 1 }));
           if (cloudRetryTimerRef.current) clearTimeout(cloudRetryTimerRef.current);
           cloudRetryTimerRef.current = setTimeout(() => scheduleAttempt(1500), 3000);
           return;
@@ -1821,7 +1971,7 @@ export default function App() {
             syncing: false,
             queueCount: 1,
             retries,
-            error: `No se pudo leer nube. Reintento en ${Math.round(retryDelay / 1000)}s.`,
+            error: `No se pudieron actualizar tus datos. Reintentando en ${Math.round(retryDelay / 1000)}s.`,
           }));
           if (cloudRetryTimerRef.current) clearTimeout(cloudRetryTimerRef.current);
           cloudRetryTimerRef.current = setTimeout(() => scheduleAttempt(1000), retryDelay);
@@ -1837,7 +1987,7 @@ export default function App() {
             ...prev,
             syncing: false,
             conflict: { remoteUpdatedAt: remote.cloudUpdatedAt, localUpdatedAt: queue.pending?.updatedAt || null },
-            error: "Conflicto: hay cambios más nuevos en la nube.",
+            error: "Hay cambios más recientes en tu cuenta.",
           }));
           return;
         }
@@ -1854,7 +2004,7 @@ export default function App() {
             syncing: false,
             queueCount: 1,
             retries,
-            error: `Sync fallida. Reintento en ${Math.round(retryDelay / 1000)}s.`,
+            error: `No se pudieron guardar tus cambios. Reintentando en ${Math.round(retryDelay / 1000)}s.`,
           }));
           if (cloudRetryTimerRef.current) clearTimeout(cloudRetryTimerRef.current);
           cloudRetryTimerRef.current = setTimeout(() => scheduleAttempt(1000), retryDelay);
@@ -2407,7 +2557,7 @@ export default function App() {
     if (copied > 0) {
       window.alert(`Copiado: ${copied} ejercicio${copied === 1 ? "" : "s"} desde ${sourceDate}`);
     } else {
-      window.alert("Los ejercicios ya tenían sets capturados, no se copió nada.");
+      window.alert("Los ejercicios ya tenían series guardadas, no se copió nada.");
     }
   };
 
@@ -2694,7 +2844,7 @@ export default function App() {
 
   // Export
   const exportProgressCsv = () => {
-    const header = [["tipo", "fecha", "bloque", "ejercicio", "sets", "max_kg", "prom_kg", "ultimo_kg", "ultimo_reps", "volumen"]];
+    const header = [["tipo", "fecha", "bloque", "ejercicio", "series", "maximo_kg", "promedio_kg", "ultimo_kg", "ultimas_repeticiones", "carga_total"]];
     const weightRows = state.weightLogs.map((entry) => ["peso", entry.date, "", "", "", "", "", Number(entry.weight) || 0, entry.waist ?? "", ""]);
     const routineRows = routineSessions.flatMap((session) =>
       session.exerciseRows.map((item) => [
@@ -2721,7 +2871,7 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `fitapp-backup-${todayInZone(tz)}.json`;
+    link.download = `anvil-copia-${todayInZone(tz)}.json`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -2737,16 +2887,16 @@ export default function App() {
       const nextState = normalizeState(parsed?.state || parsed);
       setState(nextState);
       setSaveMeta(saveLocalState(nextState, scope, true));
-      window.alert("Backup importado correctamente.");
+      window.alert("Copia restaurada correctamente.");
     } catch {
-      window.alert("No se pudo importar el backup.");
+      window.alert("No se pudo restaurar la copia.");
     } finally {
       event.target.value = "";
     }
   };
 
   const resetDefaults = () => {
-    if (!window.confirm("¿Restaurar plan y rutinas por defecto? Esto reemplaza los días y rutinas pero conserva tu historial de sets.")) return;
+    if (!window.confirm("¿Restaurar plan y rutinas por defecto? Esto reemplaza los días y rutinas pero conserva tu historial.")) return;
     setState((prev) => ({
       ...prev,
       routine: DEFAULT_ROUTINE,
@@ -2755,7 +2905,19 @@ export default function App() {
     }));
   };
 
+  const enterLocalMode = () => {
+    setAuthError("");
+    setLocalMode(true);
+    safeLocalSet(AUTH_LOCAL_MODE_KEY, "true");
+  };
+
+  const showLogin = () => {
+    setLocalMode(false);
+    safeLocalRemove(AUTH_LOCAL_MODE_KEY);
+  };
+
   const signOut = async () => {
+    showLogin();
     if (!supabase) return;
     await supabase.auth.signOut();
   };
@@ -2763,7 +2925,7 @@ export default function App() {
   // ==========================================================================
   // Render gates
   // ==========================================================================
-  if (SUPABASE_CONFIGURED && !authReady) {
+  if (SUPABASE_CONFIGURED && !authReady && !usingLocalMode) {
     return (
       <div className="gate-shell gate-overlay">
         <div className="gate-card">
@@ -2775,26 +2937,26 @@ export default function App() {
     );
   }
 
-  if (SUPABASE_CONFIGURED && !userId) {
-    return <AuthScreen supabaseConfigured />;
+  if (SUPABASE_CONFIGURED && !userId && !usingLocalMode) {
+    return <AuthScreen supabaseConfigured authMessage={authError} onContinueLocal={enterLocalMode} />;
   }
 
   // ==========================================================================
   // Render main app
   // ==========================================================================
-  const saveStatusText = !SUPABASE_CONFIGURED
+  const saveStatusText = !hasCloudAccount
     ? "Guardado en este dispositivo"
     : cloudMeta.conflict
-      ? "Conflicto pendiente"
+      ? "Revisa tus cambios"
       : cloudMeta.syncing
-        ? "Sincronizando..."
+        ? "Guardando..."
         : cloudMeta.queueCount > 0
-          ? isOnline ? "Subiendo cambios..." : "Sin internet · pendiente"
+          ? isOnline ? "Guardando..." : "Sin internet · se guardará luego"
           : cloudMeta.error
-            ? "Guardado local"
+            ? "Guardado en este dispositivo"
             : cloudMeta.syncedAt
-              ? "Guardado en la nube"
-              : "Guardado local";
+              ? "Guardado en tu cuenta"
+              : "Guardado en este dispositivo";
 
   const displayName = state.settings.profileName || authSession?.user?.user_metadata?.display_name || authSession?.user?.email?.split("@")[0] || "Atleta";
 
@@ -2810,7 +2972,7 @@ export default function App() {
           </div>
         </div>
         <div className="stack gap-8 hero-actions">
-          {SUPABASE_CONFIGURED && userId && (
+          {hasCloudAccount && (
             <button className="btn btn-ghost btn-mini" type="button" onClick={signOut}>Salir</button>
           )}
         </div>
@@ -2826,7 +2988,7 @@ export default function App() {
           <p className="kpi-value">{`${deltaFromStart >= 0 ? "+" : ""}${deltaFromStart.toFixed(1)}kg`}</p>
         </article>
         <article className="kpi-pill">
-          <p className="kpi-label">Sets totales</p>
+          <p className="kpi-label">Series totales</p>
           <p className="kpi-value">{totalSetsLogged}</p>
         </article>
         <article className="kpi-pill">
@@ -2881,7 +3043,7 @@ export default function App() {
                 </svg>
               </button>
             </div>
-            <p className="muted small top-6">Zona horaria: {tz}. Hoy se actualiza solo a medianoche.</p>
+            <p className="muted small top-6">Hoy se actualiza solo a medianoche.</p>
           </details>
 
           <div className="day-chip-row day-chip-row-tall top-10">
@@ -2918,7 +3080,7 @@ export default function App() {
               <div className="focus-stats">
                 <span className="focus-stat">
                   <strong>{sessionSetCount}</strong>
-                  <small>sets hoy</small>
+                  <small>series hoy</small>
                 </span>
               </div>
             </div>
@@ -2931,7 +3093,7 @@ export default function App() {
               <div className="row space-between wrap">
                 <div>
                   <h4>Descanso · {restTimer.exercise}</h4>
-                  <p className="muted small top-6">Auto-iniciado al guardar un set.</p>
+                  <p className="muted small top-6">Empezó al guardar la serie.</p>
                 </div>
                 <span className="pill">{restRemainingSec}s</span>
               </div>
@@ -2964,14 +3126,14 @@ export default function App() {
             </button>
             {selectedDayExercises.length > 0 && sessionSetCount === 0 && (
               <button className="btn btn-soft" type="button" onClick={copyLastSession}>
-                ↺ Copiar última
+                ↺ Copiar sesión anterior
               </button>
             )}
           </div>
 
           {selectedDayExercises.length > 0 ? (
             <div className="top-10 stack gap-10">
-              <p className="muted small">Cada set se guarda al instante. Toca un ejercicio para abrirlo.</p>
+              <p className="muted small">Cada serie se guarda al instante. Toca un ejercicio para abrirlo.</p>
               {selectedDayExercises.map((exercise) => {
                 const history = getExerciseHistory(state.trainingLogs, selectedDay.id, exercise.id);
                 const previous = history.find((entry) => entry.date < state.sessionDate) || history.find((entry) => entry.date !== state.sessionDate) || null;
@@ -2996,7 +3158,7 @@ export default function App() {
             </div>
           ) : (
             <article className="card top-10">
-              <p className="muted">Sin ejercicios en este día. Toca "Editar plan" para asignar rutinas o agregar ejercicios.</p>
+              <p className="muted">Sin ejercicios en este día. Toca "Editar plan" para agregar una rutina.</p>
             </article>
           )}
         </section>
@@ -3040,18 +3202,18 @@ export default function App() {
               <button className="btn btn-danger btn-mini" type="button" onClick={removeSelectedDay}>Borrar día</button>
             </div>
             <div className="grid-two top-8">
-              <Field label="Etiqueta (3-4 letras)" value={selectedDay.shortDay} onChange={(value) => updateSelectedDay("shortDay", value)} />
+              <Field label="Nombre corto" value={selectedDay.shortDay} onChange={(value) => updateSelectedDay("shortDay", value)} />
               <Field label="Día completo" value={selectedDay.fullDay} onChange={(value) => updateSelectedDay("fullDay", value)} />
-              <Field label="Tipo (Fuerza, Cardio...)" value={selectedDay.type} onChange={(value) => updateSelectedDay("type", value)} />
+              <Field label="Tipo" value={selectedDay.type} onChange={(value) => updateSelectedDay("type", value)} />
               <Field label="Título de la sesión" value={selectedDay.title} onChange={(value) => updateSelectedDay("title", value)} />
             </div>
             <label className="field top-8">
-              <span>Cardio post (opcional)</span>
-              <input className="input" type="text" value={selectedDay.postCardio} onChange={(event) => updateSelectedDay("postCardio", event.target.value)} placeholder="Ej. 20 min cinta Z2" />
+              <span>Cardio después</span>
+              <input className="input" type="text" value={selectedDay.postCardio} onChange={(event) => updateSelectedDay("postCardio", event.target.value)} placeholder="Ej. 20 min caminadora suave" />
             </label>
             <label className="field top-8">
-              <span>Protocolo cardio (si aplica)</span>
-              <textarea className="input" rows={3} value={selectedDay.cardioProtocol} onChange={(event) => updateSelectedDay("cardioProtocol", event.target.value)} placeholder="Detalle del cardio..." />
+              <span>Detalle del cardio</span>
+              <textarea className="input" rows={3} value={selectedDay.cardioProtocol} onChange={(event) => updateSelectedDay("cardioProtocol", event.target.value)} placeholder="Duración, ritmo o indicaciones..." />
             </label>
           </article>
 
@@ -3111,12 +3273,12 @@ export default function App() {
 
                   <div className="exercise-edit-grid top-8">
                     <Field label="Series" value={exercise.sets} onChange={(value) => updateExercise(exercise.id, "sets", value)} />
-                    <Field label="Reps" value={exercise.reps} onChange={(value) => updateExercise(exercise.id, "reps", value)} />
+                    <Field label="Repeticiones" value={exercise.reps} onChange={(value) => updateExercise(exercise.id, "reps", value)} />
                     <Field label="Descanso" value={exercise.rest} onChange={(value) => updateExercise(exercise.id, "rest", value)} />
                   </div>
                   <label className="field top-8">
-                    <span>Nota / técnica</span>
-                    <input className="input" type="text" value={exercise.note} onChange={(event) => updateExercise(exercise.id, "note", event.target.value)} placeholder="RIR 2, biserie, etc." />
+                    <span>Nota</span>
+                    <input className="input" type="text" value={exercise.note} onChange={(event) => updateExercise(exercise.id, "note", event.target.value)} placeholder="Algo para recordar" />
                   </label>
 
                   <div className="exercise-edit-actions top-8">
@@ -3141,7 +3303,7 @@ export default function App() {
                 className="btn btn-primary btn-mini"
                 type="button"
                 onClick={() => {
-                  const name = window.prompt("Nombre de la rutina (ej. Pecho, Espalda, HIIT)") || "";
+                  const name = window.prompt("Nombre de la rutina (ej. Pecho, Espalda, Cardio)") || "";
                   if (name.trim()) createPackage(name.trim());
                 }}
               >
@@ -3180,7 +3342,7 @@ export default function App() {
                         </div>
                         <div className="exercise-edit-grid top-8">
                           <Field label="Series" value={exercise.sets} onChange={(value) => updatePackageExercise(pkg.id, exercise.id, "sets", value)} />
-                          <Field label="Reps" value={exercise.reps} onChange={(value) => updatePackageExercise(pkg.id, exercise.id, "reps", value)} />
+                          <Field label="Repeticiones" value={exercise.reps} onChange={(value) => updatePackageExercise(pkg.id, exercise.id, "reps", value)} />
                           <Field label="Descanso" value={exercise.rest} onChange={(value) => updatePackageExercise(pkg.id, exercise.id, "rest", value)} />
                         </div>
                         <label className="field top-8">
@@ -3215,7 +3377,7 @@ export default function App() {
             </div>
             {importOpen && (
               <div className="stack gap-8 top-8">
-                <p className="muted small">Sube un archivo (.json, .csv, .txt, .md) o pega texto. Reemplaza la rutina actual.</p>
+                <p className="muted small">Sube un archivo o pega la rutina. Reemplaza la rutina actual.</p>
                 <label className="btn btn-soft file-label">
                   Subir archivo
                   <input type="file" accept=".json,.csv,.txt,.md,text/plain,text/csv,application/json" onChange={onImportFile} />
@@ -3228,7 +3390,7 @@ export default function App() {
                     rows={6}
                     value={importText}
                     onChange={(event) => setImportText(event.target.value)}
-                    placeholder={"Lunes - Push\n- Bench press | 4 | 8-10 | 90s\n- Incline press | 3 | 10-12 | 75s"}
+                    placeholder={"Lunes - Pecho\n- Press banca | 4 | 8-10 | 90s\n- Press inclinado | 3 | 10-12 | 75s"}
                   />
                 </label>
                 {importError && <p className="error-text">{importError}</p>}
@@ -3254,7 +3416,7 @@ export default function App() {
             <h2>Historial</h2>
             <span className="pill">{filteredRoutineSessions.length}/{routineSessions.length}</span>
           </div>
-          <p className="muted top-8">Sesiones guardadas por fecha. Zona: {tz}.</p>
+          <p className="muted top-8">Sesiones guardadas por fecha.</p>
           <div className="top-10">
             <Field
               label="Buscar"
@@ -3266,9 +3428,9 @@ export default function App() {
 
           <section className="stats-grid compact top-10 stats-mini">
             <StatCard label="Sesiones" value={`${filteredRoutineSessions.length}`} meta="Filtradas" tone="accent" />
-            <StatCard label="Sets totales" value={`${totalSetsLogged}`} meta="Acumulado" tone="good" />
+            <StatCard label="Series totales" value={`${totalSetsLogged}`} meta="Acumulado" tone="good" />
             <StatCard label="Última" value={formatShortDateInZone(filteredRoutineSessions[0]?.date || "", tz)} meta={filteredRoutineSessions[0]?.dayName || "Sin datos"} tone="warning" />
-            <StatCard label="Activo" value={formatShortDateInZone(state.sessionDate, tz)} meta={selectedDay.fullDay} tone="good" />
+            <StatCard label="Abierta" value={formatShortDateInZone(state.sessionDate, tz)} meta={selectedDay.fullDay} tone="good" />
           </section>
 
           {selectedHistorySession && (
@@ -3280,11 +3442,11 @@ export default function App() {
               <p className="muted top-6">{selectedHistorySession.dayName} · {selectedHistorySession.title}</p>
 
               <section className="stats-grid compact top-10 stats-mini">
-                <StatCard label="Sets" value={`${selectedHistorySession.setsCount}`} meta="Capturados" tone="accent" />
-                <StatCard label="Volumen" value={`${selectedHistorySession.sessionVolume}kg`} meta="Carga × reps" tone="good" />
+                <StatCard label="Series" value={`${selectedHistorySession.setsCount}`} meta="Guardadas" tone="accent" />
+                <StatCard label="Carga total" value={`${selectedHistorySession.sessionVolume}kg`} meta="Peso movido" tone="good" />
                 <StatCard label="Ejercicios" value={`${selectedHistorySession.exerciseRows.length}`} meta="Con registro" tone="warning" />
                 <StatCard
-                  label="Top"
+                  label="Mayor"
                   value={selectedHistorySession.bestExercise ? `${selectedHistorySession.bestExercise.max}kg` : "--"}
                   meta={selectedHistorySession.bestExercise?.name || "Sin referencia"}
                   tone="danger"
@@ -3298,10 +3460,10 @@ export default function App() {
                   <div key={`resume_${selectedHistorySession.id}_${item.id}`} className="dish-card">
                     <div className="row space-between wrap">
                       <strong>{item.name}</strong>
-                      <span className="pill">{item.setsCount} sets</span>
+                      <span className="pill">{item.setsCount} serie{item.setsCount === 1 ? "" : "s"}</span>
                     </div>
                     <p className="muted small top-6">
-                      Máx {item.max}kg · Prom {item.avg}kg · Último {item.last.weight}kg × {item.last.reps}
+                      Máx {item.max}kg · Promedio {item.avg}kg · Último {item.last.weight}kg × {item.last.reps}
                     </p>
                     {itemNote && <p className="history-note top-6">📝 {itemNote}</p>}
                   </div>
@@ -3342,7 +3504,7 @@ export default function App() {
                   <span className="pill">{formatShortDateInZone(session.date, tz)}</span>
                 </div>
                 <p className="muted top-6">{session.title}</p>
-                <p className="muted small top-6">Sets: {session.setsCount} · Volumen: {session.sessionVolume}kg · Top: {session.bestExercise ? `${session.bestExercise.max}kg` : "--"}</p>
+                <p className="muted small top-6">Series: {session.setsCount} · Carga total: {session.sessionVolume}kg · Mayor: {session.bestExercise ? `${session.bestExercise.max}kg` : "--"}</p>
 
                 <div className="row gap-8 wrap top-8">
                   <button className="btn btn-soft btn-mini" type="button" onClick={() => setSelectedHistorySessionId(session.id)}>
@@ -3365,19 +3527,19 @@ export default function App() {
           </div>
           <div className="row gap-8 wrap top-8">
             <button className="btn btn-primary" type="button" onClick={addWeightLog}>Guardar peso</button>
-            <button className="btn btn-soft" type="button" onClick={exportProgressCsv}>Exportar CSV</button>
+            <button className="btn btn-soft" type="button" onClick={exportProgressCsv}>Descargar progreso</button>
           </div>
 
           <section className="stats-grid compact top-10 stats-mini">
             <StatCard label="Racha actual" value={`${streakInfo.current}`} meta={streakInfo.current === 1 ? "día seguido" : "días seguidos"} tone="accent" />
             <StatCard label="Mejor racha" value={`${streakInfo.best}`} meta="histórica" tone="good" />
             <StatCard label="Peso actual" value={latestWeight ? `${latestWeight.toFixed(1)}kg` : "--"} meta="Más reciente" tone="warning" />
-            <StatCard label="PRs" value={`${exercisePbs.length}`} meta="Ejercicios" tone="danger" />
+            <StatCard label="Récords" value={`${exercisePbs.length}`} meta="Ejercicios" tone="danger" />
           </section>
 
           <article className="card top-12">
             <h4>Calendario de entrenamiento</h4>
-            <p className="muted small top-6">Últimas 26 semanas. Cuadros rojos = día con sets registrados.</p>
+            <p className="muted small top-6">Cada cuadro rojo marca un día entrenado.</p>
             <div className="heatmap top-8" role="img" aria-label="Calendario de entrenamiento">
               {heatmapData.map((week, wi) => (
                 <div key={`week_${wi}`} className="heatmap-col">
@@ -3394,7 +3556,7 @@ export default function App() {
           </article>
 
           <article className="card top-12">
-            <h4>Volumen por rutina (últimos 7 días)</h4>
+            <h4>Carga por rutina (últimos 7 días)</h4>
             {volumeByPackage.length === 0 ? (
               <p className="muted top-8">Sin entrenamientos esta semana.</p>
             ) : (
@@ -3407,7 +3569,7 @@ export default function App() {
                       <div className="volume-head">
                         <span className="volume-dot" style={{ background: row.color }} />
                         <strong>{row.name}</strong>
-                        <span className="volume-meta">{row.volume}kg · {row.sets} sets</span>
+                        <span className="volume-meta">{row.volume}kg · {row.sets} serie{row.sets === 1 ? "" : "s"}</span>
                       </div>
                       <div className="volume-bar">
                         <div className="volume-bar-fill" style={{ width: `${widthPct}%`, background: row.color }} />
@@ -3426,15 +3588,15 @@ export default function App() {
           </article>
 
           <article className="card top-12">
-            <h4>Volumen semanal</h4>
-            <p className="muted small top-6">Carga total (peso × reps) por semana.</p>
+            <h4>Carga semanal</h4>
+            <p className="muted small top-6">Peso movido en tus series por semana.</p>
             <MiniLineChart points={weeklyVolumePoints} color="#35c26c" />
             <div className="stack gap-8 top-8">
               {weeklyVolumeRows.slice(-4).reverse().map((row) => (
                 <div key={row.weekKey} className="log-row">
                   <div>
                     <strong>{row.weekKey}</strong>
-                    <p className="muted small">Volumen {row.volume}kg · Sets {row.sets}</p>
+                    <p className="muted small">Carga {row.volume}kg · Series {row.sets}</p>
                   </div>
                 </div>
               ))}
@@ -3442,14 +3604,14 @@ export default function App() {
           </article>
 
           <article className="card top-12">
-            <h4>PRs por ejercicio</h4>
-            {exercisePbs.length === 0 && <p className="muted top-8">Aún no hay PRs detectados.</p>}
+            <h4>Récords por ejercicio</h4>
+            {exercisePbs.length === 0 && <p className="muted top-8">Aún no hay récords.</p>}
             <div className="stack gap-8 top-8">
               {exercisePbs.map((item) => (
                 <div key={item.id} className="log-row">
                   <div>
                     <strong>{item.name}</strong>
-                    <p className="muted small">PR {item.max}kg · {formatShortDateInZone(item.date, tz)}</p>
+                    <p className="muted small">Récord {item.max}kg · {formatShortDateInZone(item.date, tz)}</p>
                   </div>
                 </div>
               ))}
@@ -3499,43 +3661,48 @@ export default function App() {
             </div>
           </article>
 
-          {SUPABASE_CONFIGURED && userId && (
+          {hasCloudAccount && (
             <article className="card top-12">
               <h4>Cuenta</h4>
-              <p className="muted top-6">Sesión activa: <strong>{authSession?.user?.email}</strong></p>
-              <p className="muted small top-6">ID: {userId}</p>
+              <p className="muted top-6"><strong>{authSession?.user?.email}</strong></p>
               <div className="row gap-8 wrap top-10">
                 <button className="btn btn-danger" type="button" onClick={signOut}>Cerrar sesión</button>
               </div>
             </article>
           )}
 
+          {SUPABASE_CONFIGURED && usingLocalMode && (
+            <article className="card top-12">
+              <h4>Cuenta</h4>
+              <p className="muted top-6">Estás usando la app en este dispositivo.</p>
+              <div className="row gap-8 wrap top-10">
+                <button className="btn btn-primary" type="button" onClick={showLogin}>Iniciar sesión</button>
+              </div>
+            </article>
+          )}
+
           <article className="card top-12">
-            <h4>Datos y respaldo</h4>
+            <h4>Tus datos</h4>
             <ul className="clean-list">
-              <li>Guardado local: {saveMeta.lastSavedAt ? formatDateTimeInZone(saveMeta.lastSavedAt, tz) : "--"}</li>
-              <li>Backups locales: {saveMeta.backupCount}</li>
-              <li>Último backup: {saveMeta.lastBackupAt ? formatDateTimeInZone(new Date(saveMeta.lastBackupAt).toISOString(), tz) : "--"}</li>
-              <li>Modo: {SUPABASE_CONFIGURED ? "Cuenta en la nube" : "Solo este dispositivo"}</li>
-              {SUPABASE_CONFIGURED && <li>Estado nube: {cloudMeta.syncing ? "Sincronizando..." : cloudMeta.error ? "Con incidencias" : "Activa"}</li>}
-              {SUPABASE_CONFIGURED && <li>Última sincronización: {cloudMeta.syncedAt ? formatDateTimeInZone(cloudMeta.syncedAt, tz) : "--"}</li>}
-              {SUPABASE_CONFIGURED && <li>Pendientes: {cloudMeta.queueCount || 0}</li>}
+              <li>Último guardado: {saveMeta.lastSavedAt ? formatDateTimeInZone(saveMeta.lastSavedAt, tz) : "--"}</li>
+              <li>Guardado en: {hasCloudAccount ? "Tu cuenta" : "Este dispositivo"}</li>
+              {hasCloudAccount && cloudMeta.syncedAt && <li>Última actualización: {formatDateTimeInZone(cloudMeta.syncedAt, tz)}</li>}
             </ul>
             {saveMeta.error && <p className="error-text">{saveMeta.error}</p>}
-            {cloudMeta.error && <p className="error-text">{cloudMeta.error}</p>}
-            {cloudMeta.conflict && (
+            {hasCloudAccount && cloudMeta.error && <p className="error-text">{cloudMeta.error}</p>}
+            {hasCloudAccount && cloudMeta.conflict && (
               <div className="stack gap-8 top-8">
-                <p className="error-text">Conflicto: la nube tiene cambios más recientes.</p>
+                <p className="error-text">Hay cambios más recientes en tu cuenta.</p>
                 <div className="row gap-8 wrap">
-                  <button className="btn btn-soft" type="button" onClick={useCloudVersion}>Usar versión de la nube</button>
-                  <button className="btn btn-danger" type="button" onClick={overwriteCloudVersion}>Sobrescribir nube con local</button>
+                  <button className="btn btn-soft" type="button" onClick={useCloudVersion}>Usar versión guardada</button>
+                  <button className="btn btn-danger" type="button" onClick={overwriteCloudVersion}>Mantener esta versión</button>
                 </div>
               </div>
             )}
             <div className="row gap-8 wrap top-10">
-              <button className="btn btn-ghost" type="button" onClick={exportBackup}>Exportar backup</button>
+              <button className="btn btn-ghost" type="button" onClick={exportBackup}>Descargar copia</button>
               <label className="btn btn-soft file-label">
-                Importar backup
+                Restaurar copia
                 <input type="file" accept="application/json" onChange={importBackup} />
               </label>
               <button className="btn btn-danger" type="button" onClick={resetDefaults}>Restaurar rutina por defecto</button>

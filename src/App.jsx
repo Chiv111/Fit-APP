@@ -280,6 +280,62 @@ const DEFAULT_PACKAGES = [
       { id: "px_core_2", name: "Crunch", sets: "3", reps: "12-15", rest: "45s", note: "" },
     ],
   },
+  {
+    id: "pkg_biceps",
+    name: "Bíceps",
+    color: "#5b9bd5",
+    exercises: [
+      { id: "px_biceps_1", name: "Curl barra", sets: "3", reps: "8-12", rest: "60s", note: "" },
+      { id: "px_biceps_2", name: "Curl martillo", sets: "3", reps: "10-12", rest: "60s", note: "" },
+    ],
+  },
+  {
+    id: "pkg_triceps",
+    name: "Tríceps",
+    color: "#a06cd5",
+    exercises: [
+      { id: "px_triceps_1", name: "Press francés", sets: "3", reps: "10-12", rest: "60s", note: "" },
+      { id: "px_triceps_2", name: "Extensiones polea", sets: "3", reps: "10-15", rest: "60s", note: "" },
+      { id: "px_triceps_3", name: "Fondos", sets: "3", reps: "max", rest: "90s", note: "" },
+    ],
+  },
+  {
+    id: "pkg_cuadriceps",
+    name: "Cuádriceps",
+    color: "#ff7e5f",
+    exercises: [
+      { id: "px_cuadri_1", name: "Sentadilla", sets: "4", reps: "6-10", rest: "120s", note: "" },
+      { id: "px_cuadri_2", name: "Prensa 45°", sets: "3", reps: "8-12", rest: "90s", note: "" },
+      { id: "px_cuadri_3", name: "Extensiones cuádriceps", sets: "3", reps: "10-15", rest: "60s", note: "" },
+    ],
+  },
+  {
+    id: "pkg_femoral",
+    name: "Femoral / Posterior",
+    color: "#2dc7d8",
+    exercises: [
+      { id: "px_femoral_1", name: "Peso muerto rumano", sets: "4", reps: "6-10", rest: "120s", note: "" },
+      { id: "px_femoral_2", name: "Curl femoral", sets: "3", reps: "10-12", rest: "75s", note: "" },
+      { id: "px_femoral_3", name: "Hip thrust", sets: "3", reps: "8-12", rest: "90s", note: "" },
+    ],
+  },
+  {
+    id: "pkg_pantorrilla",
+    name: "Pantorrilla",
+    color: "#6cd2a0",
+    exercises: [
+      { id: "px_pant_1", name: "Elevación gemelos de pie", sets: "4", reps: "12-15", rest: "45s", note: "" },
+    ],
+  },
+  {
+    id: "pkg_core",
+    name: "Core",
+    color: "#c0c5d0",
+    exercises: [
+      { id: "px_core_1", name: "Plancha", sets: "3", reps: "30-60s", rest: "45s", note: "" },
+      { id: "px_core_2", name: "Crunch", sets: "3", reps: "12-15", rest: "45s", note: "" },
+    ],
+  },
 ];
 
 const DEFAULT_ROUTINE = [
@@ -288,77 +344,124 @@ const DEFAULT_ROUTINE = [
     shortDay: "LUN",
     fullDay: "Lunes",
     type: "Empuje",
-    title: "Pecho · Hombro · Tríceps",
-    postCardio: "",
+    title: "PUSH + ABS",
+    postCardio: "Cardio: Zona 2 — 20-30 min suave, DESPUÉS de pesas",
     cardioProtocol: "",
-    packageIds: ["pkg_pecho", "pkg_hombro", "pkg_triceps"],
-    customExercises: [],
+    packageIds: [],
+    customExercises: [
+      { id: "ex_press_inc_manc_e2", name: "Press inclinado mancuerna", sets: "4", reps: "6-8", rest: "120-180s", note: "PESADO" },
+      { id: "ex_press_hombro_manc_e2", name: "Press hombro sentado mancuerna", sets: "3", reps: "8-10", rest: "90-120s", note: "" },
+      { id: "ex_lateral_polea_baja_e2", name: "Lateral en polea baja (G2)", sets: "4", reps: "12-20", rest: "60-90s", note: "BOMBEO 0-1 RIR" },
+      { id: "ex_aperturas_inc_manc_e2", name: "Aperturas inclinadas mancuerna", sets: "3", reps: "12-15", rest: "60-90s", note: "estira a fondo" },
+      { id: "ex_katana_uni_polea_e2", name: "Katana unilateral en polea", sets: "3", reps: "10-12", rest: "60-90s", note: "long head, estirado, c/b" },
+      { id: "ex_triceps_cuerda_e2", name: "Tríceps cuerda", sets: "3", reps: "12-15", rest: "60-90s", note: "BOMBEO" },
+      { id: "ex_abs_crunch_polea_e2", name: "ABS A: Crunch en polea de rodillas", sets: "3", reps: "10-15", rest: "60-90s", note: "con carga — progresa peso como un básico" },
+      { id: "ex_abs_press_pallof_e2", name: "ABS B: Press Pallof", sets: "2", reps: "10-12", rest: "60s", note: "antirrotación, cintura, c/l" },
+    ],
   },
   {
     id: "d_mar",
     shortDay: "MAR",
     fullDay: "Martes",
-    type: "Descanso",
-    title: "Descanso activo",
-    postCardio: "",
+    type: "Jalón",
+    title: "PULL",
+    postCardio: "Cardio: Zona 2 — 20-30 min",
     cardioProtocol: "",
     packageIds: [],
-    customExercises: [],
+    customExercises: [
+      { id: "ex_dominadas_e2", name: "Dominadas", sets: "5", reps: "submáx", rest: "120-180s", note: "PESADO — primero, prioridad" },
+      { id: "ex_jalon_pecho_e2", name: "Jalón al pecho (G2)", sets: "3", reps: "8-10", rest: "90-120s", note: "" },
+      { id: "ex_remo_sentado_e2", name: "Remo sentado (G2)", sets: "4", reps: "6-8", rest: "120-180s", note: "PESADO" },
+      { id: "ex_curl_manc_e2", name: "Curl con mancuerna", sets: "4", reps: "6-8", rest: "120-180s", note: "PESADO — bíceps" },
+      { id: "ex_curl_martillo_e2", name: "Curl martillo", sets: "3", reps: "10-12", rest: "60-90s", note: "braquial, grosor" },
+      { id: "ex_face_pull_e2", name: "Face pull (G2)", sets: "3", reps: "15-20", rest: "60-90s", note: "salud de hombro" },
+    ],
   },
   {
     id: "d_mie",
     shortDay: "MIE",
     fullDay: "Miércoles",
-    type: "Jalón",
-    title: "Espalda · Bíceps",
-    postCardio: "",
+    type: "Pierna",
+    title: "LOWER (cuádriceps) + ABS",
+    postCardio: "Cardio: Bici o caminata inclinada — 15-20 min (cero impacto)",
     cardioProtocol: "",
-    packageIds: ["pkg_espalda", "pkg_biceps"],
-    customExercises: [],
+    packageIds: [],
+    customExercises: [
+      { id: "ex_sentadilla_goblet_e2", name: "Sentadilla goblet mancuerna", sets: "4", reps: "10-15", rest: "90-120s", note: "" },
+      { id: "ex_bulgaras_manc_e2", name: "Búlgaras mancuerna", sets: "3", reps: "8-12", rest: "90s", note: "torso vertical, c/p" },
+      { id: "ex_extension_pierna_e2", name: "Extensión de pierna (G2)", sets: "3", reps: "10-15", rest: "60-90s", note: "0-1 RIR" },
+      { id: "ex_peso_muerto_rum_e2", name: "Peso muerto rumano mancuerna", sets: "3", reps: "8-10", rest: "90-120s", note: "femoral" },
+      { id: "ex_pantorrilla_pie_e2", name: "Pantorrilla de pie", sets: "4", reps: "12-20", rest: "60-90s", note: "pausa abajo" },
+      { id: "ex_abs_leg_raise_e2", name: "ABS A: Elevación de piernas colgado", sets: "3", reps: "8-12", rest: "60-90s", note: "alimenta L-sit y muscle-up" },
+      { id: "ex_abs_plancha_lat_e2", name: "ABS B: Plancha lateral", sets: "2", reps: "30-45s", rest: "45s", note: "c/l" },
+    ],
   },
   {
     id: "d_jue",
     shortDay: "JUE",
     fullDay: "Jueves",
-    type: "Descanso",
-    title: "Descanso",
-    postCardio: "",
+    type: "Torso",
+    title: "UPPER",
+    postCardio: "Cardio: Zona 2 — 20-30 min",
     cardioProtocol: "",
     packageIds: [],
-    customExercises: [],
+    customExercises: [
+      { id: "ex_chin_ups_e2", name: "Chin-ups (palmas hacia ti)", sets: "4", reps: "submáx", rest: "120-180s", note: "jala + bíceps" },
+      { id: "ex_bench_dips_e2", name: "Bench dips + mancuerna en regazo", sets: "4", reps: "8-12", rest: "90-120s", note: "sustituto de fondos — clave muscle-up" },
+      { id: "ex_press_inc_manc_up_e2", name: "Press inclinado mancuerna", sets: "3", reps: "10-12", rest: "90-120s", note: "2ª dosis pecho" },
+      { id: "ex_remo_banco_e2", name: "Remo apoyado en banco o jalón (G2)", sets: "3", reps: "10-12", rest: "90-120s", note: "" },
+      { id: "ex_lateral_polea_e2", name: "Lateral en polea", sets: "3", reps: "12-20", rest: "60-90s", note: "2ª dosis hombro" },
+      { id: "ex_curl_scott_e2", name: "Curl scott o concentrado", sets: "3", reps: "12-15", rest: "60-90s", note: "BOMBEO — pico" },
+    ],
   },
   {
     id: "d_vie",
     shortDay: "VIE",
     fullDay: "Viernes",
     type: "Pierna",
-    title: "Cuádriceps · Femoral · Glúteo",
-    postCardio: "",
+    title: "LOWER (femoral/glúteo) + ABS",
+    postCardio: "Cardio: Bici o caminata inclinada — 15-20 min",
     cardioProtocol: "",
-    packageIds: ["pkg_cuadriceps", "pkg_femoral", "pkg_pantorrilla"],
-    customExercises: [],
+    packageIds: [],
+    customExercises: [
+      { id: "ex_pm_rumano_femoral_e2", name: "Peso muerto rumano mancuerna", sets: "4", reps: "8-10", rest: "120-180s", note: "PESADO — rey del femoral" },
+      { id: "ex_hip_thrust_manc_e2", name: "Hip thrust mancuerna en banco", sets: "4", reps: "10-15", rest: "90-120s", note: "aprieta arriba" },
+      { id: "ex_bulgaras_gluteo_e2", name: "Búlgaras torso adelante", sets: "3", reps: "10-12", rest: "90s", note: "glúteo, c/p" },
+      { id: "ex_curl_femoral_e2", name: "Curl femoral (G2)", sets: "3", reps: "10-15", rest: "60-90s", note: "" },
+      { id: "ex_hiperextensiones_e2", name: "Hiperextensiones banco romano", sets: "3", reps: "12-20", rest: "60-90s", note: "" },
+      { id: "ex_pantorrilla_pie_2_e2", name: "Pantorrilla de pie", sets: "4", reps: "12-20", rest: "60-90s", note: "" },
+      { id: "ex_abs_crunch_polea_2_e2", name: "ABS A: Crunch en polea de rodillas", sets: "3", reps: "10-15", rest: "60-90s", note: "2ª dosis con carga" },
+      { id: "ex_abs_leg_raise_2_e2", name: "ABS B: Elevación de piernas colgado", sets: "2", reps: "8-12", rest: "60s", note: "" },
+    ],
   },
   {
     id: "d_sab",
     shortDay: "SAB",
     fullDay: "Sábado",
-    type: "Libre",
-    title: "Día libre",
+    type: "Cardio",
+    title: "LONG RUN + DOMINADAS",
     postCardio: "",
-    cardioProtocol: "",
+    cardioProtocol: "Carrera Zona 2: 45-75 min (TOPE en déficit). Dominadas frescas repartidas: 1-2 reps, lejos del fallo (GtG). Flexiones variadas + core suave a gusto.",
     packageIds: [],
-    customExercises: [],
+    customExercises: [
+      { id: "ex_carrera_z2_e2", name: "Carrera Zona 2", sets: "1", reps: "45-75 min", rest: "—", note: "TOPE en déficit" },
+      { id: "ex_dominadas_frescas_e2", name: "Dominadas frescas repartidas", sets: "var", reps: "1-2", rest: "—", note: "lejos del fallo, varias series (GtG)" },
+      { id: "ex_flexiones_core_e2", name: "Flexiones variadas + core suave", sets: "var", reps: "a gusto", rest: "—", note: "Acumulas reps sin fatiga" },
+    ],
   },
   {
     id: "d_dom",
     shortDay: "DOM",
     fullDay: "Domingo",
-    type: "Cardio",
-    title: "Cardio suave",
+    type: "Movilidad",
+    title: "YOGA + MOVILIDAD",
     postCardio: "",
-    cardioProtocol: "30-40 min ritmo conversacional",
+    cardioProtocol: "Yoga / movilidad / estiramiento: tu rutina de 30 min ya diseñada (30-60 min). Caminata con Apollo (opcional): flujo de sangre sin costo (30-45 min). Recuperar es la otra mitad del trabajo.",
     packageIds: [],
-    customExercises: [],
+    customExercises: [
+      { id: "ex_yoga_mov_e2", name: "Yoga / movilidad / estiramiento", sets: "1", reps: "30-60 min", rest: "—", note: "tu rutina de 30 min ya diseñada" },
+      { id: "ex_caminata_apollo_e2", name: "Caminata con Apollo (opcional)", sets: "1", reps: "30-45 min", rest: "—", note: "flujo de sangre sin costo" },
+    ],
   },
 ];
 
@@ -1766,9 +1869,15 @@ export default function App() {
   const scope = hasCloudAccount ? userId : (!SUPABASE_CONFIGURED || usingLocalMode ? LOCAL_SCOPE : null);
 
   // App state
-  const [state, setState] = useState(() =>
-    SUPABASE_CONFIGURED && !localMode ? normalizeState(DEFAULT_STATE) : loadLocalState(LOCAL_SCOPE)
-  );
+  const [state, setState] = useState(() => {
+    const loaded = SUPABASE_CONFIGURED && !localMode ? normalizeState(DEFAULT_STATE) : loadLocalState(LOCAL_SCOPE);
+    const migrationFlag = "fitapp_migrated_to_elite_2_0_local";
+    if (safeLocalGet(migrationFlag) !== "true") {
+      loaded.routine = DEFAULT_ROUTINE;
+      safeLocalSet(migrationFlag, "true");
+    }
+    return loaded;
+  });
   const [draftLogs, setDraftLogs] = useState(() =>
     SUPABASE_CONFIGURED && !localMode ? {} : loadDrafts(LOCAL_SCOPE)
   );
@@ -1863,6 +1972,14 @@ export default function App() {
     const localState = loadLocalState(scope);
     const localDrafts = loadDrafts(scope);
     pendingCloudPayloadRef.current = loadSyncQueue(scope);
+
+    // Migrate routine to Elite 2.0 if not done
+    const migrationFlag = `fitapp_migrated_to_elite_2_0_${scope}`;
+    if (safeLocalGet(migrationFlag) !== "true") {
+      localState.routine = DEFAULT_ROUTINE;
+      safeLocalSet(migrationFlag, "true");
+    }
+
     setState(localState);
     setDraftLogs(localDrafts);
     setTodayStr(todayInZone(localState.settings.timezone));
@@ -1892,10 +2009,18 @@ export default function App() {
       const cloudUpdatedAt = Date.parse(cloud.cloudUpdatedAt || "") || 0;
 
       knownCloudUpdatedAtRef.current = cloud.cloudUpdatedAt || null;
-      if (cloud.payload && cloudUpdatedAt > localUpdatedAt) {
-        setState(cloud.payload);
-        setSaveMeta(saveLocalState(cloud.payload, userId));
+      let finalState = (cloud.payload && cloudUpdatedAt > localUpdatedAt) ? cloud.payload : localRaw;
+      finalState = normalizeState(finalState);
+
+      const migrationFlag = `fitapp_migrated_to_elite_2_0_${userId}`;
+      if (safeLocalGet(migrationFlag) !== "true") {
+        finalState.routine = DEFAULT_ROUTINE;
+        finalState.updatedAt = new Date().toISOString();
+        safeLocalSet(migrationFlag, "true");
       }
+
+      setState(finalState);
+      setSaveMeta(saveLocalState(finalState, userId));
       setCloudMeta((prev) => ({
         ...prev,
         enabled: true,

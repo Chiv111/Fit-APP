@@ -782,30 +782,55 @@ function scopedKey(prefix, scope) {
 }
 
 function loadLocalState(scope) {
+  let loaded = null;
   const raw = safeLocalGet(scopedKey(STATE_KEY_PREFIX, scope));
   if (raw) {
     const parsed = parseJson(raw, null);
-    if (parsed && typeof parsed === "object") return normalizeState(parsed);
+    if (parsed && typeof parsed === "object") {
+      loaded = normalizeState(parsed);
+    }
   }
 
-  if (scope === LOCAL_SCOPE) {
+  if (!loaded && scope === LOCAL_SCOPE) {
     for (const legacyKey of LEGACY_STATE_KEYS) {
       const legacyRaw = safeLocalGet(legacyKey);
       if (!legacyRaw) continue;
       const parsed = parseJson(legacyRaw, null);
-      if (parsed && typeof parsed === "object") return normalizeState(parsed);
+      if (parsed && typeof parsed === "object") {
+        loaded = normalizeState(parsed);
+        break;
+      }
     }
-    for (const legacyBackupKey of LEGACY_BACKUP_KEYS) {
-      const backups = parseJson(safeLocalGet(legacyBackupKey), []);
-      if (!Array.isArray(backups)) continue;
-      for (let idx = backups.length - 1; idx >= 0; idx -= 1) {
-        const snapshot = backups[idx]?.snapshot;
-        if (snapshot && typeof snapshot === "object") return normalizeState(snapshot);
+    if (!loaded) {
+      for (const legacyBackupKey of LEGACY_BACKUP_KEYS) {
+        const backups = parseJson(safeLocalGet(legacyBackupKey), []);
+        if (!Array.isArray(backups)) continue;
+        for (let idx = backups.length - 1; idx >= 0; idx -= 1) {
+          const snapshot = backups[idx]?.snapshot;
+          if (snapshot && typeof snapshot === "object") {
+            loaded = normalizeState(snapshot);
+            break;
+          }
+        }
+        if (loaded) break;
       }
     }
   }
 
-  return normalizeState(DEFAULT_STATE);
+  if (!loaded) {
+    loaded = normalizeState(DEFAULT_STATE);
+  }
+
+  // Apply Elite 2.0 migration (V2 flag to force upgrade)
+  const migrationFlag = `fitapp_migrated_to_elite_2_0_v2_${scope || LOCAL_SCOPE}`;
+  if (safeLocalGet(migrationFlag) !== "true") {
+    loaded.routine = DEFAULT_ROUTINE;
+    loaded.updatedAt = new Date().toISOString();
+    safeLocalSet(scopedKey(STATE_KEY_PREFIX, scope || LOCAL_SCOPE), JSON.stringify(loaded));
+    safeLocalSet(migrationFlag, "true");
+  }
+
+  return loaded;
 }
 
 function saveLocalState(state, scope, forceBackup = false) {
@@ -1869,15 +1894,9 @@ export default function App() {
   const scope = hasCloudAccount ? userId : (!SUPABASE_CONFIGURED || usingLocalMode ? LOCAL_SCOPE : null);
 
   // App state
-  const [state, setState] = useState(() => {
-    const loaded = SUPABASE_CONFIGURED && !localMode ? normalizeState(DEFAULT_STATE) : loadLocalState(LOCAL_SCOPE);
-    const migrationFlag = "fitapp_migrated_to_elite_2_0_local";
-    if (safeLocalGet(migrationFlag) !== "true") {
-      loaded.routine = DEFAULT_ROUTINE;
-      safeLocalSet(migrationFlag, "true");
-    }
-    return loaded;
-  });
+  const [state, setState] = useState(() =>
+    SUPABASE_CONFIGURED && !localMode ? normalizeState(DEFAULT_STATE) : loadLocalState(LOCAL_SCOPE)
+  );
   const [draftLogs, setDraftLogs] = useState(() =>
     SUPABASE_CONFIGURED && !localMode ? {} : loadDrafts(LOCAL_SCOPE)
   );
@@ -1972,14 +1991,6 @@ export default function App() {
     const localState = loadLocalState(scope);
     const localDrafts = loadDrafts(scope);
     pendingCloudPayloadRef.current = loadSyncQueue(scope);
-
-    // Migrate routine to Elite 2.0 if not done
-    const migrationFlag = `fitapp_migrated_to_elite_2_0_${scope}`;
-    if (safeLocalGet(migrationFlag) !== "true") {
-      localState.routine = DEFAULT_ROUTINE;
-      safeLocalSet(migrationFlag, "true");
-    }
-
     setState(localState);
     setDraftLogs(localDrafts);
     setTodayStr(todayInZone(localState.settings.timezone));
@@ -2012,7 +2023,7 @@ export default function App() {
       let finalState = (cloud.payload && cloudUpdatedAt > localUpdatedAt) ? cloud.payload : localRaw;
       finalState = normalizeState(finalState);
 
-      const migrationFlag = `fitapp_migrated_to_elite_2_0_${userId}`;
+      const migrationFlag = `fitapp_migrated_to_elite_2_0_v2_${userId}`;
       if (safeLocalGet(migrationFlag) !== "true") {
         finalState.routine = DEFAULT_ROUTINE;
         finalState.updatedAt = new Date().toISOString();

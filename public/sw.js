@@ -1,5 +1,5 @@
-const CACHE_NAME = "lockin-cache-v2";
-const URLS = ["/", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png", "/icons/icon-180.png"];
+const CACHE_NAME = "lockin-cache-v3";
+const URLS = ["/", "/manifest.webmanifest", "/icons/anvil-logo.png"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(

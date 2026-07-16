@@ -1,17 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { parseRoutineImport } from "./profileOnboarding.js";
+import { Onboarding } from "./Onboarding.jsx";
+import { extractRoutineTextFromPdf } from "./pdfRoutine.js";
+import { BrandLogo } from "./BrandLogo.jsx";
 
 // ============================================================================
 // 1. CONSTANTS + SUPABASE
 // ============================================================================
 const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL || "").trim();
-const SUPABASE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY || "").trim();
+const SUPABASE_PUBLIC_KEY = (
+  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
+  || import.meta.env.VITE_SUPABASE_ANON_KEY
+  || ""
+).trim();
 const SUPABASE_AUTH_REDIRECT_URL = (import.meta.env.VITE_SUPABASE_AUTH_REDIRECT_URL || "").trim();
-const SUPABASE_CONFIGURED = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
+const SUPABASE_CONFIGURED = Boolean(SUPABASE_URL && SUPABASE_PUBLIC_KEY);
 
 const supabase = SUPABASE_CONFIGURED
-  ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  ? createClient(SUPABASE_URL, SUPABASE_PUBLIC_KEY, {
       auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
     })
   : null;
@@ -22,6 +29,7 @@ const BACKUP_KEY_PREFIX = "fitapp_backups_v4";
 const DRAFT_KEY_PREFIX = "fitapp_drafts_v4";
 const SYNC_QUEUE_KEY_PREFIX = "fitapp_sync_queue_v4";
 const AUTH_LOCAL_MODE_KEY = "fitapp_auth_local_mode_v1";
+const DEVICE_IMPORT_FLAG_PREFIX = "fitapp_device_imported_v1";
 const LEGACY_STATE_KEYS = ["lockin_state_v3", "lockin_state_v2", "lockin_state_v1", "fit_app_state_v6", "fit_app_state_v5"];
 const LEGACY_BACKUP_KEYS = ["lockin_backups_v3", "lockin_backups_v2", "lockin_backups_v1"];
 const LOCAL_SCOPE = "local";
@@ -33,7 +41,7 @@ const MAX_BACKUPS = 30;
 
 const TABS = [
   ["hoy", "Hoy"],
-  ["historial", "Historial"],
+  ["historial", "Calendario"],
   ["progreso", "Progreso"],
   ["ajustes", "Ajustes"],
 ];
@@ -171,6 +179,51 @@ function weekdayIndexInZone(tz, date = new Date()) {
   return map[weekday] ?? 0;
 }
 
+function monthKeyFromDate(dateString) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(dateString || ""))
+    ? String(dateString).slice(0, 7)
+    : "";
+}
+
+function shiftMonthKey(monthKey, offset) {
+  const [year, month] = String(monthKey || "").split("-").map(Number);
+  if (!year || !month) return monthKey;
+  const date = new Date(Date.UTC(year, month - 1 + offset, 1));
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function formatMonthLabel(monthKey) {
+  const [year, month] = String(monthKey || "").split("-").map(Number);
+  if (!year || !month) return "Calendario";
+  const date = new Date(Date.UTC(year, month - 1, 1, 12));
+  const label = new Intl.DateTimeFormat("es", {
+    timeZone: "UTC",
+    month: "long",
+    year: "numeric",
+  }).format(date);
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+function getMonthCells(monthKey) {
+  const [year, month] = String(monthKey || "").split("-").map(Number);
+  if (!year || !month) return [];
+  const firstDay = new Date(Date.UTC(year, month - 1, 1));
+  const leadingEmptyDays = (firstDay.getUTCDay() + 6) % 7;
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const cells = Array.from({ length: leadingEmptyDays }, () => null);
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    cells.push(`${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`);
+  }
+  while (cells.length % 7 !== 0) cells.push(null);
+  return cells;
+}
+
+function weekdayIndexFromIso(dateString) {
+  const [year, month, day] = String(dateString || "").split("-").map(Number);
+  if (!year || !month || !day) return 0;
+  return (new Date(Date.UTC(year, month - 1, day)).getUTCDay() + 6) % 7;
+}
+
 function getIsoWeekKey(dateString) {
   const [year, month, day] = String(dateString).split("-").map(Number);
   if (!year || !month || !day) return "0000-W00";
@@ -222,62 +275,6 @@ const DEFAULT_PACKAGES = [
       { id: "px_hombro_1", name: "Press militar", sets: "3", reps: "6-10", rest: "90s", note: "" },
       { id: "px_hombro_2", name: "Elevaciones laterales", sets: "3", reps: "10-15", rest: "60s", note: "" },
       { id: "px_hombro_3", name: "Pájaros / Deltoide posterior", sets: "3", reps: "10-15", rest: "60s", note: "" },
-    ],
-  },
-  {
-    id: "pkg_biceps",
-    name: "Bíceps",
-    color: "#5b9bd5",
-    exercises: [
-      { id: "px_biceps_1", name: "Curl barra", sets: "3", reps: "8-12", rest: "60s", note: "" },
-      { id: "px_biceps_2", name: "Curl martillo", sets: "3", reps: "10-12", rest: "60s", note: "" },
-    ],
-  },
-  {
-    id: "pkg_triceps",
-    name: "Tríceps",
-    color: "#a06cd5",
-    exercises: [
-      { id: "px_triceps_1", name: "Press francés", sets: "3", reps: "10-12", rest: "60s", note: "" },
-      { id: "px_triceps_2", name: "Extensiones polea", sets: "3", reps: "10-15", rest: "60s", note: "" },
-      { id: "px_triceps_3", name: "Fondos", sets: "3", reps: "max", rest: "90s", note: "" },
-    ],
-  },
-  {
-    id: "pkg_cuadriceps",
-    name: "Cuádriceps",
-    color: "#ff7e5f",
-    exercises: [
-      { id: "px_cuadri_1", name: "Sentadilla", sets: "4", reps: "6-10", rest: "120s", note: "" },
-      { id: "px_cuadri_2", name: "Prensa 45°", sets: "3", reps: "8-12", rest: "90s", note: "" },
-      { id: "px_cuadri_3", name: "Extensiones cuádriceps", sets: "3", reps: "10-15", rest: "60s", note: "" },
-    ],
-  },
-  {
-    id: "pkg_femoral",
-    name: "Femoral / Posterior",
-    color: "#2dc7d8",
-    exercises: [
-      { id: "px_femoral_1", name: "Peso muerto rumano", sets: "4", reps: "6-10", rest: "120s", note: "" },
-      { id: "px_femoral_2", name: "Curl femoral", sets: "3", reps: "10-12", rest: "75s", note: "" },
-      { id: "px_femoral_3", name: "Hip thrust", sets: "3", reps: "8-12", rest: "90s", note: "" },
-    ],
-  },
-  {
-    id: "pkg_pantorrilla",
-    name: "Pantorrilla",
-    color: "#6cd2a0",
-    exercises: [
-      { id: "px_pant_1", name: "Elevación gemelos de pie", sets: "4", reps: "12-15", rest: "45s", note: "" },
-    ],
-  },
-  {
-    id: "pkg_core",
-    name: "Core",
-    color: "#c0c5d0",
-    exercises: [
-      { id: "px_core_1", name: "Plancha", sets: "3", reps: "30-60s", rest: "45s", note: "" },
-      { id: "px_core_2", name: "Crunch", sets: "3", reps: "12-15", rest: "45s", note: "" },
     ],
   },
   {
@@ -472,8 +469,14 @@ const DEFAULT_STATE = {
   routine: DEFAULT_ROUTINE,
   exercisePackages: DEFAULT_PACKAGES,
   trainingLogs: {},
+  trainingLogMeta: {},
   exerciseNotes: {},
   weightLogs: [],
+  onboarding: {
+    completed: false,
+    source: null,
+    completedAt: null,
+  },
 };
 
 // ============================================================================
@@ -564,18 +567,43 @@ function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
 
+function numericSetValue(value) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  if (typeof value !== "string") return 0;
+  const normalized = value.trim().replace(",", ".");
+  const match = normalized.match(/^(-?\d+(?:\.\d+)?)/);
+  return match ? Number(match[1]) || 0 : 0;
+}
+
+function normalizeSetField(value) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : "";
+  if (typeof value === "string") return value.trim();
+  return "";
+}
+
+function hasSetField(value) {
+  return String(value ?? "").trim().length > 0;
+}
+
+function formatSetWeight(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return "—";
+  return /^-?\d+(?:[.,]\d+)?$/.test(text) ? `${text} kg` : text;
+}
+
 function averageWeight(sets) {
-  if (!sets.length) return null;
-  const sum = sets.reduce((acc, item) => acc + (Number(item.weight) || 0), 0);
-  return sum / sets.length;
+  const numericWeights = sets.map((item) => numericSetValue(item.weight)).filter((value) => value > 0);
+  if (!numericWeights.length) return null;
+  const sum = numericWeights.reduce((acc, value) => acc + value, 0);
+  return sum / numericWeights.length;
 }
 
 function normalizeSet(candidate) {
-  const weight = Number(candidate?.weight ?? candidate?.w ?? 0);
-  const reps = Number(candidate?.reps ?? candidate?.r ?? 0);
+  const weight = normalizeSetField(candidate?.weight ?? candidate?.w ?? "");
+  const reps = normalizeSetField(candidate?.reps ?? candidate?.r ?? "");
   return {
-    weight: Number.isNaN(weight) ? 0 : weight,
-    reps: Number.isNaN(reps) ? 0 : reps,
+    weight,
+    reps,
     ts: candidate?.ts || Date.now(),
   };
 }
@@ -643,6 +671,61 @@ function normalizeTrainingLogs(candidate, tz) {
   return nested;
 }
 
+function normalizeTrainingLogMeta(candidate) {
+  if (!candidate || typeof candidate !== "object") return {};
+  const normalized = {};
+  Object.entries(candidate).forEach(([dayId, byDate]) => {
+    if (!byDate || typeof byDate !== "object" || Array.isArray(byDate)) return;
+    Object.entries(byDate).forEach(([date, meta]) => {
+      if (!meta || typeof meta !== "object" || Array.isArray(meta)) return;
+      if (!normalized[dayId]) normalized[dayId] = {};
+      normalized[dayId][date] = {
+        dayName: String(meta.dayName || "").trim(),
+        title: String(meta.title || "").trim(),
+        exerciseNames: meta.exerciseNames && typeof meta.exerciseNames === "object"
+          ? Object.fromEntries(
+              Object.entries(meta.exerciseNames)
+                .filter(([exerciseId, name]) => exerciseId && typeof name === "string" && name.trim())
+                .map(([exerciseId, name]) => [exerciseId, name.trim()])
+            )
+          : {},
+      };
+    });
+  });
+  return normalized;
+}
+
+function summarizeTrainingLogs(trainingLogs) {
+  const dates = new Set();
+  let setsCount = 0;
+  Object.values(trainingLogs || {}).forEach((byDate) => {
+    Object.entries(byDate || {}).forEach(([date, byExercise]) => {
+      let dateSets = 0;
+      Object.values(byExercise || {}).forEach((sets) => {
+        dateSets += Array.isArray(sets) ? sets.length : 0;
+      });
+      if (dateSets > 0) dates.add(date);
+      setsCount += dateSets;
+    });
+  });
+  return { trainingDays: dates.size, setsCount };
+}
+
+function normalizeOnboarding(candidate, { settings, trainingLogs, weightLogs }) {
+  const raw = candidate?.onboarding && typeof candidate.onboarding === "object"
+    ? candidate.onboarding
+    : null;
+  const activity = summarizeTrainingLogs(trainingLogs);
+  const inferredCompleted = activity.setsCount > 0
+    || weightLogs.length > 0
+    || Boolean(settings.profileName);
+  return {
+    completed: typeof raw?.completed === "boolean" ? raw.completed : inferredCompleted,
+    source: typeof raw?.source === "string" ? raw.source : null,
+    completedAt: typeof raw?.completedAt === "string" ? raw.completedAt : null,
+  };
+}
+
 function normalizeSettings(candidate) {
   const merged = { ...DEFAULT_SETTINGS, ...(candidate || {}) };
   merged.timezone = safeTimezone(merged.timezone);
@@ -690,6 +773,7 @@ function normalizeRoutine(candidate) {
 
 function normalizePackages(candidate) {
   if (!Array.isArray(candidate)) return [];
+  const seenPackageIds = new Set();
   return candidate
     .filter((pkg) => pkg && typeof pkg === "object")
     .map((pkg, pkgIndex) => ({
@@ -697,7 +781,12 @@ function normalizePackages(candidate) {
       name: cleanUserText(String(pkg.name || `Paquete ${pkgIndex + 1}`).trim()),
       color: typeof pkg.color === "string" && pkg.color.trim() ? pkg.color.trim() : "#9aa3b2",
       exercises: Array.isArray(pkg.exercises) ? pkg.exercises.map(normalizeExercise) : [],
-    }));
+    }))
+    .filter((pkg) => {
+      if (seenPackageIds.has(pkg.id)) return false;
+      seenPackageIds.add(pkg.id);
+      return true;
+    });
 }
 
 function getDayExercises(day, packages) {
@@ -719,6 +808,16 @@ function normalizeState(candidate) {
     ? normalizePackages(candidate.exercisePackages)
     : DEFAULT_PACKAGES;
   const todayStr = todayInZone(settings.timezone);
+  const trainingLogs = normalizeTrainingLogs(candidate?.trainingLogs, settings.timezone);
+  const weightLogs = Array.isArray(candidate?.weightLogs)
+    ? candidate.weightLogs.map((entry) => ({
+        id: entry.id || makeId("w"),
+        date: entry.date || todayStr,
+        weight: Number(entry.weight) || 0,
+        waist: entry.waist === null || entry.waist === undefined ? null : Number(entry.waist),
+        ts: entry.ts || Date.now(),
+      }))
+    : [];
   return {
     dayIndex: clamp(Number(candidate?.dayIndex) || 0, 0, routine.length - 1),
     sessionDate: typeof candidate?.sessionDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(candidate.sessionDate)
@@ -727,17 +826,20 @@ function normalizeState(candidate) {
     settings,
     routine,
     exercisePackages,
-    trainingLogs: normalizeTrainingLogs(candidate?.trainingLogs, settings.timezone),
+    trainingLogs,
+    trainingLogMeta: normalizeTrainingLogMeta(candidate?.trainingLogMeta),
     exerciseNotes: normalizeExerciseNotes(candidate?.exerciseNotes),
-    weightLogs: Array.isArray(candidate?.weightLogs)
-      ? candidate.weightLogs.map((entry) => ({
-          id: entry.id || makeId("w"),
-          date: entry.date || todayStr,
-          weight: Number(entry.weight) || 0,
-          waist: entry.waist === null || entry.waist === undefined ? null : Number(entry.waist),
-          ts: entry.ts || Date.now(),
-        }))
-      : [],
+    weightLogs,
+    onboarding: normalizeOnboarding(candidate, { settings, trainingLogs, weightLogs }),
+  };
+}
+
+function alignStateSessionToToday(candidate) {
+  const today = todayInZone(candidate.settings.timezone);
+  return {
+    ...candidate,
+    sessionDate: today,
+    dayIndex: clamp(weekdayIndexInZone(candidate.settings.timezone), 0, candidate.routine.length - 1),
   };
 }
 
@@ -831,6 +933,111 @@ function loadLocalState(scope) {
   }
 
   return loaded;
+}
+
+function readDeviceStateCandidate(userId) {
+  if (!userId || safeLocalGet(`${DEVICE_IMPORT_FLAG_PREFIX}_${userId}`) === "true") return null;
+
+  const candidates = [safeLocalGet(scopedKey(STATE_KEY_PREFIX, LOCAL_SCOPE))];
+  LEGACY_STATE_KEYS.forEach((key) => candidates.push(safeLocalGet(key)));
+
+  for (const raw of candidates) {
+    if (!raw) continue;
+    const parsed = parseJson(raw, null);
+    if (parsed && typeof parsed === "object") return normalizeState(parsed);
+  }
+
+  for (const key of LEGACY_BACKUP_KEYS) {
+    const backups = parseJson(safeLocalGet(key), []);
+    if (!Array.isArray(backups)) continue;
+    for (let index = backups.length - 1; index >= 0; index -= 1) {
+      const snapshot = backups[index]?.snapshot;
+      if (snapshot && typeof snapshot === "object") return normalizeState(snapshot);
+    }
+  }
+  return null;
+}
+
+function summarizeDeviceState(candidate) {
+  if (!candidate) {
+    return { hasRecoverableData: false, trainingDays: 0, setsCount: 0, routineDays: 0, weightLogs: 0 };
+  }
+  const activity = summarizeTrainingLogs(candidate.trainingLogs);
+  return {
+    hasRecoverableData: true,
+    ...activity,
+    routineDays: candidate.routine?.length || 0,
+    weightLogs: candidate.weightLogs?.length || 0,
+  };
+}
+
+function mergeTrainingLogs(accountLogs, deviceLogs) {
+  const merged = parseJson(JSON.stringify(accountLogs || {}), {});
+  Object.entries(deviceLogs || {}).forEach(([dayId, byDate]) => {
+    if (!merged[dayId]) merged[dayId] = {};
+    Object.entries(byDate || {}).forEach(([date, byExercise]) => {
+      if (!merged[dayId][date]) merged[dayId][date] = {};
+      Object.entries(byExercise || {}).forEach(([exerciseId, sets]) => {
+        if (Array.isArray(sets) && sets.length > 0) merged[dayId][date][exerciseId] = sets;
+      });
+    });
+  });
+  return merged;
+}
+
+function mergeTrainingMeta(accountMeta, deviceMeta) {
+  const merged = parseJson(JSON.stringify(accountMeta || {}), {});
+  Object.entries(deviceMeta || {}).forEach(([dayId, byDate]) => {
+    if (!merged[dayId]) merged[dayId] = {};
+    Object.entries(byDate || {}).forEach(([date, meta]) => {
+      merged[dayId][date] = {
+        ...(merged[dayId][date] || {}),
+        ...(meta || {}),
+        exerciseNames: {
+          ...(merged[dayId][date]?.exerciseNames || {}),
+          ...(meta?.exerciseNames || {}),
+        },
+      };
+    });
+  });
+  return merged;
+}
+
+function mergeExerciseNotes(accountNotes, deviceNotes) {
+  const merged = parseJson(JSON.stringify(accountNotes || {}), {});
+  Object.entries(deviceNotes || {}).forEach(([dayId, byDate]) => {
+    if (!merged[dayId]) merged[dayId] = {};
+    Object.entries(byDate || {}).forEach(([date, byExercise]) => {
+      merged[dayId][date] = { ...(merged[dayId][date] || {}), ...(byExercise || {}) };
+    });
+  });
+  return merged;
+}
+
+function mergeDeviceStateIntoAccount(accountState, deviceState, profileName) {
+  const normalizedAccount = normalizeState(accountState);
+  const normalizedDevice = normalizeState(deviceState);
+  const weightEntries = [...normalizedAccount.weightLogs, ...normalizedDevice.weightLogs];
+  const weightLogs = [...new Map(weightEntries.map((entry) => [entry.id, entry])).values()];
+  return alignStateSessionToToday(normalizeState({
+    ...normalizedAccount,
+    settings: {
+      ...normalizedAccount.settings,
+      ...normalizedDevice.settings,
+      profileName: profileName || normalizedDevice.settings.profileName || normalizedAccount.settings.profileName,
+    },
+    routine: normalizedDevice.routine,
+    exercisePackages: normalizedDevice.exercisePackages,
+    trainingLogs: mergeTrainingLogs(normalizedAccount.trainingLogs, normalizedDevice.trainingLogs),
+    trainingLogMeta: mergeTrainingMeta(normalizedAccount.trainingLogMeta, normalizedDevice.trainingLogMeta),
+    exerciseNotes: mergeExerciseNotes(normalizedAccount.exerciseNotes, normalizedDevice.exerciseNotes),
+    weightLogs,
+    onboarding: {
+      completed: true,
+      source: "device-recovery",
+      completedAt: new Date().toISOString(),
+    },
+  }));
 }
 
 function saveLocalState(state, scope, forceBackup = false) {
@@ -991,7 +1198,7 @@ function getExerciseHistory(trainingLogs, dayId, exerciseId) {
     .filter((entry) => entry.sets.length > 0)
     .sort((a, b) => b.date.localeCompare(a.date));
   return history.map((entry) => {
-    const max = Math.max(...entry.sets.map((item) => Number(item.weight) || 0));
+    const max = Math.max(...entry.sets.map((item) => numericSetValue(item.weight)));
     const avg = averageWeight(entry.sets);
     const last = entry.sets[entry.sets.length - 1];
     return { ...entry, max, avg, last };
@@ -1183,7 +1390,7 @@ function AuthScreen({ supabaseConfigured, authMessage = "", onContinueLocal }) {
       <div className="gate-shell gate-overlay">
         <div className="gate-card gate-card-wide">
           <div className="auth-brand">
-            <AnvilLogo size={56} />
+            <BrandLogo size={56} />
             <div>
               <p className="gate-tag">ANVIL</p>
               <h1>Cuenta no disponible</h1>
@@ -1207,7 +1414,7 @@ function AuthScreen({ supabaseConfigured, authMessage = "", onContinueLocal }) {
     <div className="gate-shell gate-overlay">
       <div className="gate-card gate-card-wide">
         <div className="auth-brand">
-          <AnvilLogo size={56} />
+          <BrandLogo size={56} />
           <div>
             <p className="gate-tag">ANVIL</p>
             <h1>{isLogin ? "Bienvenido de vuelta" : "Crea tu cuenta"}</h1>
@@ -1274,7 +1481,7 @@ function AuthScreen({ supabaseConfigured, authMessage = "", onContinueLocal }) {
         {isLogin && (
           <div className="row gap-8 wrap top-8">
             <button type="button" className="btn btn-ghost btn-mini" onClick={onResetPassword}>
-              Olvidé mi contraseña
+              Crear o cambiar contraseña
             </button>
             <button type="button" className="btn btn-soft btn-mini" onClick={onResendConfirmation} disabled={resendingConfirmation}>
               {resendingConfirmation ? "Enviando..." : "Reenviar confirmación"}
@@ -1354,32 +1561,6 @@ function ColorPicker({ value, onChange }) {
   );
 }
 
-function AnvilLogo({ size = 36 }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 64 64"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      aria-label="Anvil"
-      role="img"
-    >
-      <defs>
-        <linearGradient id="anvilBg" x1="0%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stopColor="#1f2530" />
-          <stop offset="100%" stopColor="#0e1218" />
-        </linearGradient>
-      </defs>
-      <circle cx="32" cy="32" r="30" fill="url(#anvilBg)" stroke="#ef4035" strokeWidth="2.4" />
-      <g stroke="#fff" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" fill="none">
-        <path d="M 19 50 L 32 14 L 45 50" />
-        <path d="M 25 38 L 39 38" />
-      </g>
-    </svg>
-  );
-}
-
 function beepSound(freq = 880, ms = 150) {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -1423,8 +1604,8 @@ function calculatePlates(target, bar = BAR_WEIGHT) {
 
 // Epley formula: 1RM = weight * (1 + reps/30)
 function estimateOneRm(weight, reps) {
-  const w = Number(weight) || 0;
-  const r = Number(reps) || 0;
+  const w = numericSetValue(weight);
+  const r = numericSetValue(reps);
   if (w <= 0 || r <= 0) return 0;
   if (r === 1) return w;
   return Math.round(w * (1 + r / 30) * 10) / 10;
@@ -1441,6 +1622,73 @@ function formatTimerTime(totalSec) {
   const m = Math.floor(s / 60);
   const r = s % 60;
   return `${m}:${String(r).padStart(2, "0")}`;
+}
+
+function PasswordRecoveryScreen({ email, onComplete, onCancel }) {
+  const [password, setPassword] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  const [saved, setSaved] = useState(false);
+
+  const submit = async (event) => {
+    event.preventDefault();
+    setError("");
+    if (password.length < 8) {
+      setError("Usa una contraseña de al menos 8 caracteres.");
+      return;
+    }
+    if (password !== confirmation) {
+      setError("Las contraseñas no coinciden.");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const { error: updateError } = await supabase.auth.updateUser({ password });
+      if (updateError) {
+        setError(normalizeAuthUiError(updateError));
+        return;
+      }
+      setSaved(true);
+      setPassword("");
+      setConfirmation("");
+    } catch (caught) {
+      setError(normalizeAuthUiError(caught));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="gate-shell gate-overlay">
+      <form className="gate-card gate-card-wide" onSubmit={submit}>
+        <div className="auth-brand">
+          <BrandLogo size={56} />
+          <div>
+            <p className="gate-tag">CUENTA SEGURA</p>
+            <h1>Nueva contraseña</h1>
+          </div>
+        </div>
+        <p className="gate-sub">{email || "Tu cuenta"}</p>
+        {saved ? (
+          <div className="stack gap-10 top-12">
+            <p className="trend">✓ Contraseña actualizada correctamente.</p>
+            <button className="btn btn-primary btn-large" type="button" onClick={onComplete}>Entrar a Anvil</button>
+          </div>
+        ) : (
+          <div className="stack gap-10 top-12">
+            <Field label="Nueva contraseña" type="password" value={password} onChange={setPassword} autoComplete="new-password" />
+            <Field label="Confirmar contraseña" type="password" value={confirmation} onChange={setConfirmation} autoComplete="new-password" />
+            {error && <p className="error-text">{error}</p>}
+            <button className="btn btn-primary btn-large" type="submit" disabled={submitting}>
+              {submitting ? "Guardando..." : "Guardar contraseña"}
+            </button>
+            <button className="btn btn-ghost" type="button" onClick={onCancel}>Cancelar</button>
+          </div>
+        )}
+      </form>
+    </div>
+  );
 }
 
 function TimerModal({ open, onClose, timer, setTimer, now }) {
@@ -1640,6 +1888,7 @@ function ExerciseLogItem({
   const [noteSaved, setNoteSaved] = useState(false);
   const [showTools, setShowTools] = useState(false);
   const [plateTarget, setPlateTarget] = useState("");
+  const repsInputRef = useRef(null);
   const savedTimerRef = useRef(null);
   const noteSavedTimerRef = useRef(null);
 
@@ -1648,22 +1897,31 @@ function ExerciseLogItem({
   }, [sessionNote, exercise.id]);
 
   const latestCurrentSet = currentSets[currentSets.length - 1] || null;
-  const hasPreviousSet = Boolean(previous?.last && Number(previous.last.weight) > 0 && Number(previous.last.reps) > 0);
-  const hasLatestCurrentSet = Boolean(latestCurrentSet && Number(latestCurrentSet.weight) > 0 && Number(latestCurrentSet.reps) > 0);
+  const suggestedSet = latestCurrentSet || previous?.last || null;
+  const hasPreviousSet = Boolean(previous?.last && hasSetField(previous.last.weight) && hasSetField(previous.last.reps));
+  const hasLatestCurrentSet = Boolean(latestCurrentSet && hasSetField(latestCurrentSet.weight) && hasSetField(latestCurrentSet.reps));
 
-  const commitSet = () => {
-    const parsedWeight = Number(weight);
-    const parsedReps = Number(reps);
-    if (Number.isNaN(parsedWeight) || parsedWeight <= 0) return;
-    if (Number.isNaN(parsedReps) || parsedReps <= 0) return;
-    onAddSet(exercise.id, { weight: parsedWeight, reps: parsedReps, ts: Date.now() });
+  useEffect(() => {
+    const initialSet = currentSets[currentSets.length - 1] || previous?.last || null;
+    setWeight(initialSet ? String(initialSet.weight) : "");
+    setReps(initialSet ? String(initialSet.reps) : "");
+  }, [exercise.id]);
+
+  const commitSetValues = (nextWeight, nextReps) => {
+    const normalizedWeight = normalizeSetField(nextWeight);
+    const normalizedReps = normalizeSetField(nextReps);
+    if (!hasSetField(normalizedWeight) || !hasSetField(normalizedReps)) return;
+    onAddSet(exercise.id, { weight: normalizedWeight, reps: normalizedReps, ts: Date.now() });
     onStartRest?.(exercise);
-    setWeight("");
-    setReps("");
+    setWeight(String(normalizedWeight));
+    setReps(String(normalizedReps));
     setJustSaved(true);
     if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
     savedTimerRef.current = setTimeout(() => setJustSaved(false), 1800);
+    window.requestAnimationFrame(() => repsInputRef.current?.focus());
   };
+
+  const commitSet = () => commitSetValues(weight, reps);
 
   useEffect(() => () => {
     if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
@@ -1679,13 +1937,15 @@ function ExerciseLogItem({
   };
 
   const setsCount = currentSets.length;
+  const targetSets = Number.parseInt(String(exercise.sets), 10);
+  const targetLabel = Number.isFinite(targetSets) && targetSets > 0 ? `${setsCount}/${targetSets}` : `${setsCount}`;
   const hasNote = Boolean((sessionNote || "").trim());
 
   const oneRmCurrent = bestOneRmFromSets(currentSets);
   const oneRmPrevious = previous ? bestOneRmFromSets(previous.sets) : 0;
   const oneRmBest = Math.max(oneRmCurrent, oneRmPrevious);
 
-  const plateInfo = plateTarget ? calculatePlates(Number(plateTarget)) : null;
+  const plateInfo = plateTarget ? calculatePlates(numericSetValue(plateTarget)) : null;
 
   return (
     <article className={`exercise-card ${expanded ? "is-expanded" : ""}`}>
@@ -1706,7 +1966,7 @@ function ExerciseLogItem({
         </div>
         <div className="exercise-head-status">
           {hasNote && <span className="note-dot" title="Tiene nota">📝</span>}
-          <span className={`pill ${setsCount > 0 ? "pill-good" : ""}`}>{setsCount} serie{setsCount === 1 ? "" : "s"}</span>
+          <span className={`pill ${setsCount > 0 ? "pill-good" : ""}`}>{targetLabel} series</span>
           <span className="chevron" aria-hidden="true">{expanded ? "▴" : "▾"}</span>
         </div>
       </button>
@@ -1715,76 +1975,78 @@ function ExerciseLogItem({
         <div className="exercise-body">
           {previous && (
             <p className="trend">
-              Última vez ({previous.date}): {previous.last.weight}kg × {previous.last.reps} · máx {previous.max}kg
+              Última vez ({previous.date}): {formatSetWeight(previous.last.weight)} × {previous.last.reps}
+              {previous.max > 0 ? ` · máx ${previous.max} kg` : ""}
             </p>
           )}
 
           {currentSets.length > 0 && (
             <div className="set-list">
               {currentSets.map((entry, index) => (
-                <button
+                <div
                   key={`${exercise.id}_${index}_${entry.ts}`}
-                  type="button"
                   className="set-chip"
-                  onClick={() => onRemoveSet(exercise.id, index)}
-                  title="Toca para eliminar"
                 >
-                  S{index + 1}: {entry.weight}kg × {entry.reps}
-                </button>
+                  <span>S{index + 1}: {formatSetWeight(entry.weight)} × {entry.reps}</span>
+                  <button
+                    type="button"
+                    className="set-remove"
+                    onClick={() => onRemoveSet(exercise.id, index)}
+                    aria-label={`Eliminar serie ${index + 1}`}
+                    title="Eliminar serie"
+                  >
+                    ×
+                  </button>
+                </div>
               ))}
             </div>
           )}
 
           <div className="set-entry-row top-8">
-            <input
-              className="input"
-              type="number"
-              inputMode="decimal"
-              placeholder="kg"
-              step="0.5"
-              value={weight}
-              onChange={(event) => setWeight(event.target.value)}
-            />
-            <input
-              className="input"
-              type="number"
-              inputMode="numeric"
-              placeholder="rep."
-              step="1"
-              value={reps}
-              onChange={(event) => setReps(event.target.value)}
-            />
+            <label className="set-entry-field">
+              <span>Carga</span>
+              <input
+                className="input"
+                type="text"
+                placeholder="20 kg / BW"
+                value={weight}
+                onChange={(event) => setWeight(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") repsInputRef.current?.focus();
+                }}
+                autoComplete="off"
+              />
+            </label>
+            <label className="set-entry-field">
+              <span>Reps</span>
+              <input
+                ref={repsInputRef}
+                className="input"
+                type="text"
+                inputMode="numeric"
+                placeholder="8"
+                value={reps}
+                onChange={(event) => setReps(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") commitSet();
+                }}
+                autoComplete="off"
+              />
+            </label>
             <button className="btn btn-primary" type="button" onClick={commitSet}>
-              Guardar serie
+              Guardar S{setsCount + 1}
             </button>
           </div>
 
-          <div className="row gap-8 wrap top-8">
-            {hasPreviousSet && (
-              <button
-                className="btn btn-soft btn-mini"
-                type="button"
-                onClick={() => {
-                  setWeight(String(previous.last.weight));
-                  setReps(String(previous.last.reps));
-                }}
-              >
-                Usar última carga
-              </button>
-            )}
-            {hasLatestCurrentSet && (
-              <button
-                className="btn btn-soft btn-mini"
-                type="button"
-                onClick={() => {
-                  setWeight(String(latestCurrentSet.weight));
-                  setReps(String(latestCurrentSet.reps));
-                }}
-              >
-                Repetir serie
-              </button>
-            )}
-          </div>
+          {suggestedSet && (hasPreviousSet || hasLatestCurrentSet) && (
+            <button
+              className="btn btn-soft btn-quick-set top-8"
+              type="button"
+              onClick={() => commitSetValues(suggestedSet.weight, suggestedSet.reps)}
+            >
+              + {hasLatestCurrentSet ? `Repetir como S${setsCount + 1}` : "Registrar igual que la última vez"}
+            </button>
+          )}
 
           {justSaved && <p className="trend top-8">✓ Serie guardada</p>}
 
@@ -1830,12 +2092,16 @@ function ExerciseLogItem({
                     <button
                       type="button"
                       className="btn btn-ghost btn-mini"
-                      onClick={() => setPlateTarget(String(currentSets[currentSets.length - 1]?.weight || previous?.last?.weight || ""))}
+                      onClick={() => {
+                        const load = currentSets[currentSets.length - 1]?.weight || previous?.last?.weight || "";
+                        const numericLoad = numericSetValue(load);
+                        setPlateTarget(numericLoad > 0 ? String(numericLoad) : "");
+                      }}
                     >
                       Último
                     </button>
                   </div>
-                  {plateInfo && Number(plateTarget) > 0 && (
+                  {plateInfo && numericSetValue(plateTarget) > 0 && (
                     <div className="top-8">
                       {plateInfo.plates.length === 0 ? (
                         <p className="muted small">
@@ -1887,6 +2153,7 @@ export default function App() {
   const [authReady, setAuthReady] = useState(!SUPABASE_CONFIGURED);
   const [authSession, setAuthSession] = useState(null);
   const [authError, setAuthError] = useState("");
+  const [passwordRecoveryMode, setPasswordRecoveryMode] = useState(false);
   const [localMode, setLocalMode] = useState(() => SUPABASE_CONFIGURED && safeLocalGet(AUTH_LOCAL_MODE_KEY) === "true");
   const userId = authSession?.user?.id || null;
   const hasCloudAccount = SUPABASE_CONFIGURED && Boolean(userId);
@@ -1895,7 +2162,9 @@ export default function App() {
 
   // App state
   const [state, setState] = useState(() =>
-    SUPABASE_CONFIGURED && !localMode ? normalizeState(DEFAULT_STATE) : loadLocalState(LOCAL_SCOPE)
+    SUPABASE_CONFIGURED && !localMode
+      ? alignStateSessionToToday(normalizeState(DEFAULT_STATE))
+      : alignStateSessionToToday(loadLocalState(LOCAL_SCOPE))
   );
   const [draftLogs, setDraftLogs] = useState(() =>
     SUPABASE_CONFIGURED && !localMode ? {} : loadDrafts(LOCAL_SCOPE)
@@ -1940,13 +2209,35 @@ export default function App() {
   const [weightForm, setWeightForm] = useState({ date: "", weight: "", waist: "" });
   const [historyQuery, setHistoryQuery] = useState("");
   const [selectedHistorySessionId, setSelectedHistorySessionId] = useState("");
+  const [calendarDate, setCalendarDate] = useState(() => todayInZone(state.settings.timezone));
+  const [calendarMonth, setCalendarMonth] = useState(() => monthKeyFromDate(todayInZone(state.settings.timezone)));
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState("");
   const [importError, setImportError] = useState("");
   const [importFileName, setImportFileName] = useState("");
+  const [deviceStateCandidate, setDeviceStateCandidate] = useState(null);
+
+  const deviceStateSummary = useMemo(
+    () => summarizeDeviceState(deviceStateCandidate),
+    [deviceStateCandidate]
+  );
 
   const tz = state.settings.timezone;
   const [todayStr, setTodayStr] = useState(() => todayInZone(tz));
+  const previousTodayRef = useRef(todayStr);
+
+  useEffect(() => {
+    window.requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: "auto" }));
+  }, [tab]);
+
+  useEffect(() => {
+    const previousToday = previousTodayRef.current;
+    setCalendarDate((current) => (current === previousToday ? todayStr : current));
+    setCalendarMonth((current) => (
+      current === monthKeyFromDate(previousToday) ? monthKeyFromDate(todayStr) : current
+    ));
+    previousTodayRef.current = todayStr;
+  }, [todayStr]);
 
   // ==========================================================================
   // Auth effects
@@ -1969,8 +2260,10 @@ export default function App() {
       .finally(() => {
         if (mounted) setAuthReady(true);
       });
-    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
       setAuthSession(session || null);
+      if (event === "PASSWORD_RECOVERY") setPasswordRecoveryMode(true);
+      if (event === "SIGNED_OUT") setPasswordRecoveryMode(false);
       if (session) {
         setAuthError("");
         setLocalMode(false);
@@ -1983,17 +2276,25 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    setDeviceStateCandidate(readDeviceStateCandidate(userId));
+  }, [userId]);
+
   // ==========================================================================
   // Load local cache when user changes (or on first load with Supabase)
   // ==========================================================================
   useEffect(() => {
     if (!scope) return;
-    const localState = loadLocalState(scope);
+    const localState = alignStateSessionToToday(loadLocalState(scope));
     const localDrafts = loadDrafts(scope);
     pendingCloudPayloadRef.current = loadSyncQueue(scope);
     setState(localState);
     setDraftLogs(localDrafts);
-    setTodayStr(todayInZone(localState.settings.timezone));
+    const localToday = todayInZone(localState.settings.timezone);
+    setTodayStr(localToday);
+    setCalendarDate(localToday);
+    setCalendarMonth(monthKeyFromDate(localToday));
+    setSelectedHistorySessionId("");
   }, [scope]);
 
   // ==========================================================================
@@ -2021,7 +2322,7 @@ export default function App() {
 
       knownCloudUpdatedAtRef.current = cloud.cloudUpdatedAt || null;
       let finalState = (cloud.payload && cloudUpdatedAt > localUpdatedAt) ? cloud.payload : localRaw;
-      finalState = normalizeState(finalState);
+      finalState = alignStateSessionToToday(normalizeState(finalState));
 
       const migrationFlag = `fitapp_migrated_to_elite_2_0_v2_${userId}`;
       if (safeLocalGet(migrationFlag) !== "true") {
@@ -2326,14 +2627,14 @@ export default function App() {
   );
 
   const sessionDraft = useMemo(() => {
-    const existing = draftLogs?.[sessionDraftKey];
-    if (existing && typeof existing === "object") return existing;
     const fromSaved = {};
     selectedDayExercises.forEach((exercise) => {
       const sets = Array.isArray(sessionSavedLogs?.[exercise.id]) ? sessionSavedLogs[exercise.id].map(normalizeSet) : [];
       if (sets.length > 0) fromSaved[exercise.id] = sets;
     });
-    return fromSaved;
+    if (Object.keys(fromSaved).length > 0) return fromSaved;
+    const existing = draftLogs?.[sessionDraftKey];
+    return existing && typeof existing === "object" ? existing : fromSaved;
   }, [draftLogs, selectedDayExercises, sessionDraftKey, sessionSavedLogs]);
 
   const sessionSetCount = useMemo(
@@ -2358,18 +2659,25 @@ export default function App() {
 
   const routineSessions = useMemo(() => {
     const sessions = [];
-    state.routine.forEach((day) => {
-      const logsByDate = state.trainingLogs?.[day.id] || {};
-      const dayExercises = getDayExercises(day, state.exercisePackages);
-      const exerciseLookup = new Map(dayExercises.map((ex) => [ex.id, ex]));
+    Object.entries(state.trainingLogs || {}).forEach(([dayId, logsByDate]) => {
+      const day = state.routine.find((candidate) => candidate.id === dayId) || null;
+      const dayExercises = day ? getDayExercises(day, state.exercisePackages) : [];
       Object.entries(logsByDate).forEach(([date, byExercise]) => {
+        const meta = state.trainingLogMeta?.[dayId]?.[date] || {};
+        const exerciseLookup = new Map(dayExercises.map((ex) => [ex.id, ex]));
         const exerciseRows = Object.entries(byExercise || {})
           .map(([exerciseId, sets]) => {
             if (!Array.isArray(sets) || !sets.length) return null;
-            const exercise = exerciseLookup.get(exerciseId) || { id: exerciseId, name: `Ejercicio ${exerciseId}` };
-            const max = Math.max(...sets.map((item) => Number(item.weight) || 0));
+            const exercise = exerciseLookup.get(exerciseId) || {
+              id: exerciseId,
+              name: meta.exerciseNames?.[exerciseId] || "Ejercicio guardado",
+            };
+            const max = Math.max(...sets.map((item) => numericSetValue(item.weight)));
             const avg = averageWeight(sets);
-            const volume = sets.reduce((acc, item) => acc + (Number(item.weight) || 0) * (Number(item.reps) || 0), 0);
+            const volume = sets.reduce(
+              (acc, item) => acc + numericSetValue(item.weight) * numericSetValue(item.reps),
+              0
+            );
             return {
               id: exercise.id,
               name: exercise.name,
@@ -2385,14 +2693,17 @@ export default function App() {
         if (!exerciseRows.length) return;
         const setsCount = exerciseRows.reduce((acc, item) => acc + item.setsCount, 0);
         const sessionVolume = exerciseRows.reduce((acc, item) => acc + item.volume, 0);
-        const bestExercise = exerciseRows.reduce((best, item) => (!best || item.max > best.max ? item : best), null);
+        const bestExercise = exerciseRows
+          .filter((item) => item.max > 0)
+          .reduce((best, item) => (!best || item.max > best.max ? item : best), null);
         sessions.push({
-          id: `${day.id}_${date}`,
-          dayId: day.id,
+          id: `${dayId}_${date}`,
+          dayId,
           date,
           dateLabel: formatShortDateInZone(date, tz),
-          dayName: day.fullDay,
-          title: day.title,
+          dayName: meta.dayName || day?.fullDay || "Rutina anterior",
+          title: meta.title || day?.title || "Sesión guardada",
+          hasCurrentDay: Boolean(day),
           setsCount,
           sessionVolume,
           bestExercise,
@@ -2401,7 +2712,7 @@ export default function App() {
       });
     });
     return sessions.sort((a, b) => b.date.localeCompare(a.date));
-  }, [state.trainingLogs, state.routine, state.exercisePackages, tz]);
+  }, [state.trainingLogs, state.trainingLogMeta, state.routine, state.exercisePackages, tz]);
 
   const filteredRoutineSessions = useMemo(() => {
     const query = historyQuery.trim().toLowerCase();
@@ -2413,19 +2724,35 @@ export default function App() {
     });
   }, [historyQuery, routineSessions]);
 
+  const sessionsByDate = useMemo(() => {
+    const map = new Map();
+    routineSessions.forEach((session) => {
+      if (!map.has(session.date)) map.set(session.date, []);
+      map.get(session.date).push(session);
+    });
+    return map;
+  }, [routineSessions]);
+
+  const calendarCells = useMemo(() => getMonthCells(calendarMonth), [calendarMonth]);
+  const calendarSelectedSessions = useMemo(
+    () => sessionsByDate.get(calendarDate) || [],
+    [sessionsByDate, calendarDate]
+  );
+
   const selectedHistorySession = useMemo(() => {
-    if (!filteredRoutineSessions.length) return null;
-    return filteredRoutineSessions.find((session) => session.id === selectedHistorySessionId) || filteredRoutineSessions[0];
-  }, [filteredRoutineSessions, selectedHistorySessionId]);
+    if (!calendarSelectedSessions.length) return null;
+    return calendarSelectedSessions.find((session) => session.id === selectedHistorySessionId)
+      || calendarSelectedSessions[0];
+  }, [calendarSelectedSessions, selectedHistorySessionId]);
 
   useEffect(() => {
-    if (!filteredRoutineSessions.length) {
+    if (!calendarSelectedSessions.length) {
       if (selectedHistorySessionId) setSelectedHistorySessionId("");
       return;
     }
-    const exists = filteredRoutineSessions.some((session) => session.id === selectedHistorySessionId);
-    if (!exists) setSelectedHistorySessionId(filteredRoutineSessions[0].id);
-  }, [filteredRoutineSessions, selectedHistorySessionId]);
+    const exists = calendarSelectedSessions.some((session) => session.id === selectedHistorySessionId);
+    if (!exists) setSelectedHistorySessionId(calendarSelectedSessions[0].id);
+  }, [calendarSelectedSessions, selectedHistorySessionId]);
 
   const weightTrendPoints = useMemo(() => {
     const rows = [...state.weightLogs].sort((a, b) => a.date.localeCompare(b.date));
@@ -2554,8 +2881,6 @@ export default function App() {
     return [...byPkg.values()].filter((entry) => entry.volume > 0).sort((a, b) => b.volume - a.volume);
   }, [routineSessions, state.exercisePackages, todayStr]);
 
-  const deltaFromStart = latestWeight - Number(state.settings.startWeight || 0);
-
   // Reset weight form date when timezone changes
   useEffect(() => {
     setWeightForm((prev) => ({ ...prev, date: prev.date || todayInZone(tz) }));
@@ -2585,7 +2910,37 @@ export default function App() {
   };
 
   const setSessionDate = (date) => {
-    setState((prev) => ({ ...prev, sessionDate: date }));
+    setState((prev) => ({
+      ...prev,
+      sessionDate: date,
+      dayIndex: clamp(weekdayIndexFromIso(date), 0, prev.routine.length - 1),
+    }));
+  };
+
+  const selectCalendarDay = (date) => {
+    setCalendarDate(date);
+    const sessions = sessionsByDate.get(date) || [];
+    setSelectedHistorySessionId(sessions[0]?.id || "");
+  };
+
+  const showCalendarToday = () => {
+    setCalendarDate(todayStr);
+    setCalendarMonth(monthKeyFromDate(todayStr));
+    const sessions = sessionsByDate.get(todayStr) || [];
+    setSelectedHistorySessionId(sessions[0]?.id || "");
+  };
+
+  const openWorkoutDate = (date, dayId = null) => {
+    setState((prev) => {
+      const savedDayIndex = dayId ? prev.routine.findIndex((day) => day.id === dayId) : -1;
+      const fallbackDayIndex = clamp(weekdayIndexFromIso(date), 0, prev.routine.length - 1);
+      return {
+        ...prev,
+        sessionDate: date,
+        dayIndex: savedDayIndex >= 0 ? savedDayIndex : fallbackDayIndex,
+      };
+    });
+    setTab("hoy");
   };
 
   const buildBaseDraft = () => {
@@ -2632,7 +2987,25 @@ export default function App() {
       if (Object.keys(dayLogs).length > 0) nextTrainingLogs[selectedDay.id] = dayLogs;
       else delete nextTrainingLogs[selectedDay.id];
 
-      return { ...prev, trainingLogs: nextTrainingLogs };
+      const nextTrainingLogMeta = { ...(prev.trainingLogMeta || {}) };
+      const metaByDay = { ...(nextTrainingLogMeta[selectedDay.id] || {}) };
+      if (Object.keys(dateLogs).length > 0) {
+        const previousMeta = metaByDay[state.sessionDate] || {};
+        metaByDay[state.sessionDate] = {
+          dayName: selectedDay.fullDay,
+          title: selectedDay.title,
+          exerciseNames: {
+            ...(previousMeta.exerciseNames || {}),
+            ...Object.fromEntries(selectedDayExercises.map((exercise) => [exercise.id, exercise.name])),
+          },
+        };
+      } else {
+        delete metaByDay[state.sessionDate];
+      }
+      if (Object.keys(metaByDay).length > 0) nextTrainingLogMeta[selectedDay.id] = metaByDay;
+      else delete nextTrainingLogMeta[selectedDay.id];
+
+      return { ...prev, trainingLogs: nextTrainingLogs, trainingLogMeta: nextTrainingLogMeta };
     });
   };
 
@@ -2660,41 +3033,6 @@ export default function App() {
   const startRestTimerFromExercise = (exercise) => {
     const seconds = parseRestSeconds(exercise?.rest || "");
     setRestTimer({ endAt: Date.now() + seconds * 1000, seconds, exercise: exercise?.name || "Ejercicio" });
-  };
-
-  const copyLastSession = () => {
-    const logsByDate = state.trainingLogs?.[selectedDay.id] || {};
-    const dates = Object.keys(logsByDate)
-      .filter((date) => date !== state.sessionDate && Object.keys(logsByDate[date] || {}).length > 0)
-      .sort((a, b) => b.localeCompare(a));
-    if (dates.length === 0) {
-      window.alert("No hay sesión previa de este día para copiar.");
-      return;
-    }
-    const sourceDate = dates[0];
-    const sourceLogs = logsByDate[sourceDate] || {};
-    let copied = 0;
-    updateSessionDraft((currentDraft) => {
-      const nextDraft = { ...currentDraft };
-      selectedDayExercises.forEach((exercise) => {
-        if (Array.isArray(nextDraft[exercise.id]) && nextDraft[exercise.id].length > 0) return;
-        const sourceSets = Array.isArray(sourceLogs[exercise.id]) ? sourceLogs[exercise.id] : [];
-        if (sourceSets.length === 0) return;
-        nextDraft[exercise.id] = sourceSets.map((set) => ({
-          weight: Number(set.weight) || 0,
-          reps: Number(set.reps) || 0,
-          ts: Date.now(),
-        }));
-        copied += 1;
-      });
-      syncDraftToTrainingLogs(nextDraft);
-      return nextDraft;
-    });
-    if (copied > 0) {
-      window.alert(`Copiado: ${copied} ejercicio${copied === 1 ? "" : "s"} desde ${sourceDate}`);
-    } else {
-      window.alert("Los ejercicios ya tenían series guardadas, no se copió nada.");
-    }
   };
 
   const setExerciseNote = (exerciseId, note) => {
@@ -2933,12 +3271,13 @@ export default function App() {
     const file = event.target.files?.[0];
     if (!file) return;
     try {
-      const text = await file.text();
+      const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+      const text = isPdf ? await extractRoutineTextFromPdf(file) : await file.text();
       setImportText(text);
-      setImportFileName(file.name || "");
+      setImportFileName(isPdf ? file.name.replace(/\.pdf$/i, ".txt") : (file.name || ""));
       setImportError("");
-    } catch {
-      setImportError("No se pudo leer el archivo.");
+    } catch (caught) {
+      setImportError(caught?.message || "No se pudo leer el archivo.");
     } finally {
       event.target.value = "";
     }
@@ -3058,6 +3397,60 @@ export default function App() {
     await supabase.auth.signOut();
   };
 
+  const sendPasswordSetupLink = async () => {
+    const email = authSession?.user?.email;
+    if (!supabase || !email) return;
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: SUPABASE_AUTH_REDIRECT_URL || window.location.origin,
+    });
+    if (error) {
+      window.alert(normalizeAuthUiError(error));
+      return;
+    }
+    window.alert("Te enviamos un enlace seguro para crear o cambiar tu contraseña.");
+  };
+
+  const completeOnboarding = ({ profileName, preferences, routine, source, openEditor }) => {
+    forceCloudOverwriteRef.current = true;
+    setState((prev) => alignStateSessionToToday(normalizeState({
+      ...prev,
+      settings: {
+        ...prev.settings,
+        profileName,
+        trainingGoal: preferences.goal,
+        trainingDaysPerWeek: preferences.daysPerWeek,
+        trainingEquipment: preferences.equipment,
+      },
+      routine,
+      onboarding: {
+        completed: true,
+        source,
+        completedAt: new Date().toISOString(),
+      },
+    })));
+    setTab("hoy");
+    setRoutineEditMode(Boolean(openEditor));
+  };
+
+  const recoverDeviceState = ({ profileName = "" } = {}) => {
+    if (!userId || !deviceStateCandidate) return;
+    const summary = summarizeDeviceState(deviceStateCandidate);
+    const confirmed = window.confirm(
+      `Se combinarán ${summary.setsCount} series y ${summary.trainingDays} días entrenados con tu cuenta. No borraremos la copia de este dispositivo. ¿Continuar?`
+    );
+    if (!confirmed) return;
+
+    const recovered = mergeDeviceStateIntoAccount(state, deviceStateCandidate, profileName);
+    forceCloudOverwriteRef.current = true;
+    setState(recovered);
+    setDraftLogs(loadDrafts(LOCAL_SCOPE));
+    saveLocalState(recovered, userId, true);
+    safeLocalSet(`${DEVICE_IMPORT_FLAG_PREFIX}_${userId}`, "true");
+    setDeviceStateCandidate(null);
+    setTab("hoy");
+    setRoutineEditMode(false);
+  };
+
   // ==========================================================================
   // Render gates
   // ==========================================================================
@@ -3073,8 +3466,45 @@ export default function App() {
     );
   }
 
+  if (SUPABASE_CONFIGURED && passwordRecoveryMode && userId) {
+    return (
+      <PasswordRecoveryScreen
+        email={authSession?.user?.email}
+        onComplete={() => setPasswordRecoveryMode(false)}
+        onCancel={async () => {
+          setPasswordRecoveryMode(false);
+          await signOut();
+        }}
+      />
+    );
+  }
+
   if (SUPABASE_CONFIGURED && !userId && !usingLocalMode) {
     return <AuthScreen supabaseConfigured authMessage={authError} onContinueLocal={enterLocalMode} />;
+  }
+
+  if (hasCloudAccount && !cloudReady) {
+    return (
+      <div className="gate-shell gate-overlay">
+        <div className="gate-card">
+          <p className="gate-tag">SINCRONIZANDO</p>
+          <h1>Preparando tu cuenta...</h1>
+          <p className="gate-sub">Estamos recuperando tu rutina y progreso.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (hasCloudAccount && !state.onboarding?.completed) {
+    return (
+      <Onboarding
+        email={authSession?.user?.email || ""}
+        initialName={state.settings.profileName || authSession?.user?.user_metadata?.display_name || ""}
+        localSummary={deviceStateSummary}
+        onRecoverLocal={recoverDeviceState}
+        onComplete={completeOnboarding}
+      />
+    );
   }
 
   // ==========================================================================
@@ -3100,7 +3530,7 @@ export default function App() {
     <div className="app-shell">
       <header className="hero">
         <div className="hero-brand">
-          <AnvilLogo size={42} />
+          <BrandLogo size={42} />
           <div className="hero-text">
             <h1>Anvil</h1>
             <p className="hero-sub">{displayName}{latestWeight ? ` · ${latestWeight.toFixed(1)}kg` : ""}{state.settings.goalWeight ? ` · meta ${state.settings.goalWeight}kg` : ""}</p>
@@ -3113,25 +3543,6 @@ export default function App() {
           )}
         </div>
       </header>
-
-      <section className="kpi-strip">
-        <article className="kpi-pill">
-          <p className="kpi-label">Peso</p>
-          <p className="kpi-value">{latestWeight ? `${latestWeight.toFixed(1)}kg` : "--"}</p>
-        </article>
-        <article className="kpi-pill">
-          <p className="kpi-label">Cambio</p>
-          <p className="kpi-value">{`${deltaFromStart >= 0 ? "+" : ""}${deltaFromStart.toFixed(1)}kg`}</p>
-        </article>
-        <article className="kpi-pill">
-          <p className="kpi-label">Series totales</p>
-          <p className="kpi-value">{totalSetsLogged}</p>
-        </article>
-        <article className="kpi-pill">
-          <p className="kpi-label">Hoy</p>
-          <p className="kpi-value">{sessionSetCount}</p>
-        </article>
-      </section>
 
       <nav className="tabs" style={{ gridTemplateColumns: `repeat(${TABS.length}, minmax(0, 1fr))` }}>
         {TABS.map(([id, label]) => (
@@ -3260,16 +3671,11 @@ export default function App() {
                 </span>
               )}
             </button>
-            {selectedDayExercises.length > 0 && sessionSetCount === 0 && (
-              <button className="btn btn-soft" type="button" onClick={copyLastSession}>
-                ↺ Copiar sesión anterior
-              </button>
-            )}
           </div>
 
           {selectedDayExercises.length > 0 ? (
             <div className="top-10 stack gap-10">
-              <p className="muted small">Cada serie se guarda al instante. Toca un ejercicio para abrirlo.</p>
+              <p className="muted small">Abre un ejercicio, registra una serie y repite con un toque. Todo se guarda al instante.</p>
               {selectedDayExercises.map((exercise) => {
                 const history = getExerciseHistory(state.trainingLogs, selectedDay.id, exercise.id);
                 const previous = history.find((entry) => entry.date < state.sessionDate) || history.find((entry) => entry.date !== state.sessionDate) || null;
@@ -3277,7 +3683,7 @@ export default function App() {
                 const sessionNote = state.exerciseNotes?.[selectedDay.id]?.[state.sessionDate]?.[exercise.id] || "";
                 return (
                   <ExerciseLogItem
-                    key={exercise.id}
+                    key={`${selectedDay.id}_${state.sessionDate}_${exercise.id}`}
                     exercise={exercise}
                     previous={previous}
                     currentSets={currentSets}
@@ -3516,7 +3922,7 @@ export default function App() {
                 <p className="muted small">Sube un archivo o pega la rutina. Reemplaza la rutina actual.</p>
                 <label className="btn btn-soft file-label">
                   Subir archivo
-                  <input type="file" accept=".json,.csv,.txt,.md,text/plain,text/csv,application/json" onChange={onImportFile} />
+                  <input type="file" accept=".pdf,.json,.csv,.txt,.md,application/pdf,text/plain,text/csv,application/json" onChange={onImportFile} />
                 </label>
                 {importFileName && <p className="tiny-note">Archivo: {importFileName}</p>}
                 <label className="field">
@@ -3547,47 +3953,101 @@ export default function App() {
       )}
 
       {tab === "historial" && (
-        <section className="panel">
+        <section className="panel calendar-panel">
           <div className="row space-between wrap">
-            <h2>Historial</h2>
-            <span className="pill">{filteredRoutineSessions.length}/{routineSessions.length}</span>
+            <h2>Calendario</h2>
+            <span className="pill">
+              {trainingDateSet.size} {trainingDateSet.size === 1 ? "día" : "días"} · {totalSetsLogged} {totalSetsLogged === 1 ? "serie" : "series"}
+            </span>
           </div>
-          <p className="muted top-8">Sesiones guardadas por fecha.</p>
-          <div className="top-10">
-            <Field
-              label="Buscar"
-              value={historyQuery}
-              onChange={setHistoryQuery}
-              placeholder="Fecha, día o ejercicio"
-            />
-          </div>
+          <p className="muted top-8">Toca cualquier fecha para ver exactamente qué entrenaste.</p>
 
-          <section className="stats-grid compact top-10 stats-mini">
-            <StatCard label="Sesiones" value={`${filteredRoutineSessions.length}`} meta="Filtradas" tone="accent" />
-            <StatCard label="Series totales" value={`${totalSetsLogged}`} meta="Acumulado" tone="good" />
-            <StatCard label="Última" value={formatShortDateInZone(filteredRoutineSessions[0]?.date || "", tz)} meta={filteredRoutineSessions[0]?.dayName || "Sin datos"} tone="warning" />
-            <StatCard label="Abierta" value={formatShortDateInZone(state.sessionDate, tz)} meta={selectedDay.fullDay} tone="good" />
-          </section>
+          <article className="calendar-card top-10">
+            <header className="calendar-head">
+              <button
+                type="button"
+                className="calendar-nav"
+                aria-label="Mes anterior"
+                onClick={() => {
+                  const previousMonth = shiftMonthKey(calendarMonth, -1);
+                  setCalendarMonth(previousMonth);
+                  selectCalendarDay(`${previousMonth}-01`);
+                }}
+              >
+                ‹
+              </button>
+              <h3>{formatMonthLabel(calendarMonth)}</h3>
+              <button
+                type="button"
+                className="calendar-nav"
+                aria-label="Mes siguiente"
+                onClick={() => {
+                  const nextMonth = shiftMonthKey(calendarMonth, 1);
+                  setCalendarMonth(nextMonth);
+                  selectCalendarDay(`${nextMonth}-01`);
+                }}
+              >
+                ›
+              </button>
+            </header>
+
+            <div className="calendar-weekdays" aria-hidden="true">
+              {['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'].map((day) => <span key={day}>{day}</span>)}
+            </div>
+            <div className="calendar-grid">
+              {calendarCells.map((date, index) => {
+                if (!date) return <span key={`empty_${index}`} className="calendar-day is-empty" />;
+                const dateSessions = sessionsByDate.get(date) || [];
+                const setCount = dateSessions.reduce((total, session) => total + session.setsCount, 0);
+                return (
+                  <button
+                    key={date}
+                    type="button"
+                    className={`calendar-day ${date === calendarDate ? "is-selected" : ""} ${date === todayStr ? "is-today" : ""} ${dateSessions.length ? "is-trained" : ""}`}
+                    onClick={() => selectCalendarDay(date)}
+                    aria-pressed={date === calendarDate}
+                    aria-label={`${formatLongDateInZone(date, tz)}. ${dateSessions.length ? `${setCount} ${setCount === 1 ? "serie registrada" : "series registradas"}` : "Sin entrenamiento"}`}
+                  >
+                    <span className="calendar-day-number">{Number(date.slice(-2))}</span>
+                    {dateSessions.length > 0 && <span className="calendar-day-dot" />}
+                    {setCount > 0 && <small>{setCount}</small>}
+                  </button>
+                );
+              })}
+            </div>
+
+            <footer className="calendar-footer">
+              <button className="btn btn-soft btn-mini" type="button" onClick={showCalendarToday}>Ir a hoy</button>
+              <span>{formatLongDateInZone(calendarDate, tz)} · {calendarDate.slice(0, 4)}</span>
+            </footer>
+          </article>
+
+          {calendarSelectedSessions.length > 1 && (
+            <div className="calendar-session-switcher top-10">
+              {calendarSelectedSessions.map((session) => (
+                <button
+                  key={`switch_${session.id}`}
+                  type="button"
+                  className={`btn btn-mini ${selectedHistorySession?.id === session.id ? "btn-primary" : "btn-soft"}`}
+                  onClick={() => setSelectedHistorySessionId(session.id)}
+                >
+                  {session.dayName}
+                </button>
+              ))}
+            </div>
+          )}
 
           {selectedHistorySession && (
             <article className="card top-12 history-summary">
               <div className="row space-between wrap">
-                <h4>Resumen del día</h4>
-                <span className="pill">{formatShortDateInZone(selectedHistorySession.date, tz)}</span>
+                <h4>{selectedHistorySession.dayName}</h4>
+                <span className="pill">
+                  {selectedHistorySession.setsCount} {selectedHistorySession.setsCount === 1 ? "serie" : "series"}
+                </span>
               </div>
-              <p className="muted top-6">{selectedHistorySession.dayName} · {selectedHistorySession.title}</p>
+              <p className="muted top-6">{selectedHistorySession.title}</p>
 
-              <section className="stats-grid compact top-10 stats-mini">
-                <StatCard label="Series" value={`${selectedHistorySession.setsCount}`} meta="Guardadas" tone="accent" />
-                <StatCard label="Carga total" value={`${selectedHistorySession.sessionVolume}kg`} meta="Peso movido" tone="good" />
-                <StatCard label="Ejercicios" value={`${selectedHistorySession.exerciseRows.length}`} meta="Con registro" tone="warning" />
-                <StatCard
-                  label="Mayor"
-                  value={selectedHistorySession.bestExercise ? `${selectedHistorySession.bestExercise.max}kg` : "--"}
-                  meta={selectedHistorySession.bestExercise?.name || "Sin referencia"}
-                  tone="danger"
-                />
-              </section>
+              {!selectedHistorySession.hasCurrentDay && <span className="pill pill-muted top-8">Plan anterior</span>}
 
               <div className="stack gap-8 top-10">
                 {selectedHistorySession.exerciseRows.map((item) => {
@@ -3599,7 +4059,9 @@ export default function App() {
                       <span className="pill">{item.setsCount} serie{item.setsCount === 1 ? "" : "s"}</span>
                     </div>
                     <p className="muted small top-6">
-                      Máx {item.max}kg · Promedio {item.avg}kg · Último {item.last.weight}kg × {item.last.reps}
+                      Último {formatSetWeight(item.last.weight)} × {item.last.reps}
+                      {item.max > 0 ? ` · Máx ${item.max} kg` : ""}
+                      {item.avg > 0 ? ` · Promedio ${item.avg} kg` : ""}
                     </p>
                     {itemNote && <p className="history-note top-6">📝 {itemNote}</p>}
                   </div>
@@ -3607,49 +4069,68 @@ export default function App() {
                 })}
               </div>
 
-              <div className="row gap-8 wrap top-10">
-                <button
-                  className="btn btn-primary"
-                  type="button"
-                  onClick={() => {
-                    setState((prev) => {
-                      const dayIndex = prev.routine.findIndex((day) => day.id === selectedHistorySession.dayId);
-                      if (dayIndex < 0) return prev;
-                      return { ...prev, dayIndex, sessionDate: selectedHistorySession.date };
-                    });
-                    setTab("hoy");
-                  }}
-                >
-                  Abrir en Hoy
-                </button>
-              </div>
+              {selectedHistorySession.hasCurrentDay && (
+                <div className="row gap-8 wrap top-10">
+                  <button
+                    className="btn btn-primary"
+                    type="button"
+                    onClick={() => openWorkoutDate(selectedHistorySession.date, selectedHistorySession.dayId)}
+                  >
+                    Abrir este entrenamiento
+                  </button>
+                </div>
+              )}
             </article>
           )}
 
-          <div className="stack gap-10 top-12">
-            {filteredRoutineSessions.length === 0 && (
-              <article className="card">
-                <p className="muted">Aún no hay sesiones guardadas para este filtro.</p>
-              </article>
-            )}
+          {!selectedHistorySession && (
+            <article className="card top-12 calendar-empty-state">
+              <span className="calendar-empty-icon">○</span>
+              <div>
+                <h4>Sin entrenamiento registrado</h4>
+                <p className="muted top-6">Puedes consultar esta fecha o empezar una rutina para ese día.</p>
+              </div>
+              <button className="btn btn-primary" type="button" onClick={() => openWorkoutDate(calendarDate)}>
+                Registrar entrenamiento
+              </button>
+            </article>
+          )}
 
-            {filteredRoutineSessions.map((session) => (
-              <article key={session.id} className={`card history-card ${selectedHistorySession?.id === session.id ? "selected" : ""}`}>
-                <div className="row space-between wrap">
-                  <h4>{session.dayName}</h4>
-                  <span className="pill">{formatShortDateInZone(session.date, tz)}</span>
-                </div>
-                <p className="muted top-6">{session.title}</p>
-                <p className="muted small top-6">Series: {session.setsCount} · Carga total: {session.sessionVolume}kg · Mayor: {session.bestExercise ? `${session.bestExercise.max}kg` : "--"}</p>
-
-                <div className="row gap-8 wrap top-8">
-                  <button className="btn btn-soft btn-mini" type="button" onClick={() => setSelectedHistorySessionId(session.id)}>
-                    Ver resumen
+          <details className="history-all top-12">
+            <summary>Todo el historial ({routineSessions.length})</summary>
+            <div className="top-10">
+              <Field
+                label="Buscar"
+                value={historyQuery}
+                onChange={setHistoryQuery}
+                placeholder="Fecha, día o ejercicio"
+              />
+            </div>
+            <div className="stack gap-10 top-10">
+              {filteredRoutineSessions.length === 0 && <p className="muted">No hay resultados para esta búsqueda.</p>}
+              {filteredRoutineSessions.map((session) => (
+                <article key={session.id} className={`card history-card ${selectedHistorySession?.id === session.id ? "selected" : ""}`}>
+                  <div className="row space-between wrap">
+                    <h4>{session.dayName}</h4>
+                    <span className="pill">{session.date}</span>
+                  </div>
+                  <p className="muted small top-6">{session.title} · {session.setsCount} series</p>
+                  <button
+                    className="btn btn-soft btn-mini top-8"
+                    type="button"
+                    onClick={() => {
+                      setCalendarDate(session.date);
+                      setCalendarMonth(monthKeyFromDate(session.date));
+                      setSelectedHistorySessionId(session.id);
+                      window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "smooth" }));
+                    }}
+                  >
+                    Ver día
                   </button>
-                </div>
-              </article>
-            ))}
-          </div>
+                </article>
+              ))}
+            </div>
+          </details>
         </section>
       )}
 
@@ -3802,6 +4283,7 @@ export default function App() {
               <h4>Cuenta</h4>
               <p className="muted top-6"><strong>{authSession?.user?.email}</strong></p>
               <div className="row gap-8 wrap top-10">
+                <button className="btn btn-soft" type="button" onClick={sendPasswordSetupLink}>Cambiar contraseña</button>
                 <button className="btn btn-danger" type="button" onClick={signOut}>Cerrar sesión</button>
               </div>
             </article>
@@ -3814,6 +4296,18 @@ export default function App() {
               <div className="row gap-8 wrap top-10">
                 <button className="btn btn-primary" type="button" onClick={showLogin}>Iniciar sesión</button>
               </div>
+            </article>
+          )}
+
+          {hasCloudAccount && deviceStateSummary.hasRecoverableData && (
+            <article className="card top-12">
+              <h4>Datos anteriores en este dispositivo</h4>
+              <p className="muted top-6">
+                Encontramos {deviceStateSummary.trainingDays} días entrenados y {deviceStateSummary.setsCount} series fuera de tu cuenta.
+              </p>
+              <button className="btn btn-primary top-10" type="button" onClick={() => recoverDeviceState({ profileName: state.settings.profileName })}>
+                Combinar con mi cuenta
+              </button>
             </article>
           )}
 

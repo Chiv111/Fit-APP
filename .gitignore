@@ -7,4 +7,7 @@ dist
 .env.local
 .env.*.local
 
+# Supabase CLI local project metadata
+supabase/.temp/
+
 .claude/

@@ -217,6 +217,19 @@ export function buildRecommendedRoutine(preferences) {
   return pickTemplate(preferences.goal, preferences.daysPerWeek, preferences.equipment);
 }
 
+export function buildManualRoutine(daysPerWeek = 4) {
+  const safeDays = Math.min(Math.max(Number(daysPerWeek) || 4, 1), 7);
+  return Array.from({ length: safeDays }, (_, index) =>
+    makeDay(index, {
+      type: "Fuerza",
+      title: "Mi sesión",
+      postCardio: "",
+      cardioProtocol: "",
+      exercises: [makeExercise("Nuevo ejercicio", "3", "8-10", "90s", "")],
+    })
+  );
+}
+
 function parseJsonRoutine(text) {
   const parsed = JSON.parse(text);
   if (Array.isArray(parsed)) return normalizeRoutineDays(parsed);
@@ -276,8 +289,11 @@ function parseCsvRoutine(text) {
 
 function resolveHeading(line) {
   const cleaned = line.replace(/^#+\s*/, "").replace(/^dia\s*[:\-]\s*/i, "").trim();
-  const [rawDay, ...titleParts] = cleaned.split(/\s*-\s*/);
-  const alias = DAY_ALIASES[safeSlug(rawDay)];
+  const [rawDay, ...titleParts] = cleaned.split(/\s*(?:-|:|—)\s*/);
+  const numericDay = safeSlug(rawDay).match(/^(?:dia|day)?_?(\d{1,2})$/);
+  const numericIndex = numericDay ? Math.max(0, Number(numericDay[1]) - 1) : -1;
+  const alias = DAY_ALIASES[safeSlug(rawDay)]
+    || (numericIndex >= 0 ? DAY_BLUEPRINTS[numericIndex % DAY_BLUEPRINTS.length] : null);
   if (!alias) return null;
   return {
     ...alias,
@@ -295,7 +311,7 @@ function parseTextRoutine(text) {
   let currentDay = null;
 
   lines.forEach((line) => {
-    const heading = line.startsWith("#") || /^dia\s*[:\-]/i.test(line) ? resolveHeading(line) : resolveHeading(line);
+    const heading = resolveHeading(line);
     if (heading) {
       currentDay = {
         shortDay: heading.shortDay,
@@ -327,9 +343,9 @@ function parseTextRoutine(text) {
       return;
     }
 
-    const xMatch = cleaned.match(/^(.+?)\s+(\d+(?:-\d+)?)x(\d+(?:-\d+)?)(?:\s*-\s*(.+))?$/i);
+    const xMatch = cleaned.match(/^(.+?)\s+(\d+)\s*[x×]\s*(\d+(?:\s*-\s*\d+)?(?:\s*(?:reps?|min|seg|s))?)(?:\s*(?:-|–|—|·)\s*(.+))?$/i);
     if (xMatch) {
-      currentDay.exercises.push(makeExercise(xMatch[1], xMatch[2], xMatch[3], xMatch[4], ""));
+      currentDay.exercises.push(makeExercise(xMatch[1], xMatch[2], xMatch[3], xMatch[4] || "90s", ""));
       return;
     }
 

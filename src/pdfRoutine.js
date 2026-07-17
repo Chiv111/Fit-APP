@@ -6,14 +6,37 @@ let pdfJsPromise = null;
 async function loadPdfJs() {
   if (!pdfJsPromise) {
     pdfJsPromise = Promise.all([
-      import("pdfjs-dist/build/pdf.mjs"),
-      import("pdfjs-dist/build/pdf.worker.mjs?url"),
+      // The legacy bundle includes the polyfills required by older Safari/iOS
+      // versions (for example Promise.withResolvers and AbortSignal.any).
+      import("pdfjs-dist/legacy/build/pdf.mjs"),
+      import("pdfjs-dist/legacy/build/pdf.worker.mjs?url"),
     ]).then(([pdfjs, workerModule]) => {
       pdfjs.GlobalWorkerOptions.workerSrc = workerModule.default;
       return pdfjs;
+    }).catch((error) => {
+      pdfJsPromise = null;
+      throw error;
     });
   }
   return pdfJsPromise;
+}
+
+function readFileAsArrayBuffer(file) {
+  if (typeof file?.arrayBuffer === "function") {
+    return file.arrayBuffer();
+  }
+
+  if (typeof FileReader === "undefined") {
+    throw new Error("Este navegador no puede leer archivos PDF. Actualiza Safari o intenta desde otro navegador.");
+  }
+
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error("No pudimos leer el archivo PDF."));
+    reader.onabort = () => reject(new Error("La lectura del PDF fue cancelada."));
+    reader.readAsArrayBuffer(file);
+  });
 }
 
 function groupTextItems(items) {
@@ -54,7 +77,11 @@ function groupTextItems(items) {
 }
 
 export async function extractRoutineTextFromPdf(file, onProgress) {
-  if (!file || file.type !== "application/pdf") {
+  const isPdf = file && (
+    file.type === "application/pdf"
+    || String(file.name || "").toLowerCase().endsWith(".pdf")
+  );
+  if (!isPdf) {
     throw new Error("Selecciona un archivo PDF válido.");
   }
   if (file.size > MAX_PDF_BYTES) {
@@ -62,7 +89,7 @@ export async function extractRoutineTextFromPdf(file, onProgress) {
   }
 
   const pdfjs = await loadPdfJs();
-  const data = new Uint8Array(await file.arrayBuffer());
+  const data = new Uint8Array(await readFileAsArrayBuffer(file));
   const loadingTask = pdfjs.getDocument({ data });
   const document = await loadingTask.promise;
 

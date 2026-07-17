@@ -297,8 +297,144 @@ function resolveHeading(line) {
   if (!alias) return null;
   return {
     ...alias,
+    dayIndex: numericIndex,
     title: titleParts.join(" - ").trim() || `Sesion ${alias.fullDay}`,
   };
+}
+
+function parseTimedPrescription(value) {
+  const match = String(value || "").trim().match(
+    /^(\d+(?:\s*-\s*\d+)?\s*(?:reps?|min(?:utos?)?|seg(?:undos?)?|s)\b)(?:\s*[,;—-]\s*|\s+)?(.*)$/i
+  );
+  if (!match) return null;
+  return {
+    reps: match[1].replace(/\s*-\s*/g, "-").trim(),
+    note: match[2].trim(),
+  };
+}
+
+function parseStructuredExercise(line, pendingSets = "") {
+  const parts = line
+    .replace(/^\d+\.\s*/, "")
+    .split("|")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const name = parts.shift() || "Nuevo ejercicio";
+  let sets = pendingSets || "3";
+  let reps = "8-10";
+  let noteParts = [];
+  let hasPrescription = false;
+
+  const xIndex = parts.findIndex((part) => /^\d+\s*[x×]\s*\S+/i.test(part));
+  if (xIndex >= 0) {
+    const match = parts[xIndex].match(/^(\d+)\s*[x×]\s*(.+)$/i);
+    sets = match[1];
+    reps = match[2].replace(/\s*-\s*/g, "-").trim();
+    noteParts = parts.filter((_, index) => index !== xIndex);
+    hasPrescription = true;
+  } else if (parts.length >= 2 && /^\d+$/.test(parts[parts.length - 1])) {
+    sets = parts.pop();
+    const timed = parseTimedPrescription(parts.shift());
+    if (timed) {
+      reps = timed.reps;
+      noteParts = [timed.note, ...parts].filter(Boolean);
+      hasPrescription = true;
+    } else {
+      noteParts = parts;
+    }
+  } else if (parts.length >= 2 && /^(?:gtg|libre)$/i.test(parts[parts.length - 1])) {
+    sets = parts.pop();
+    const rawReps = parts.shift();
+    const timed = parseTimedPrescription(rawReps);
+    reps = timed?.reps || rawReps || "a gusto";
+    noteParts = [timed?.note, ...parts].filter(Boolean);
+    hasPrescription = true;
+  } else {
+    const timedIndex = parts.findIndex((part) => {
+      const timed = parseTimedPrescription(part);
+      return timed && !timed.note;
+    });
+    if (timedIndex >= 0) {
+      const timed = parseTimedPrescription(parts[timedIndex]);
+      sets = pendingSets || "1";
+      reps = timed.reps;
+      noteParts = parts.filter((_, index) => index !== timedIndex);
+      hasPrescription = true;
+    } else {
+      noteParts = parts;
+    }
+  }
+
+  return {
+    exercise: makeExercise(name, sets, reps, "90s", noteParts.join(" · ")),
+    needsSupplementalReps: Boolean(pendingSets) && !hasPrescription,
+  };
+}
+
+function parseStructuredTextRoutine(lines) {
+  const days = [];
+  const seenDayIndexes = new Set();
+  let currentDay = null;
+  let pendingSets = "";
+  let needsSupplementalReps = false;
+
+  for (const line of lines) {
+    const heading = resolveHeading(line);
+    const isNumericHeading = heading
+      && heading.dayIndex >= 0
+      && /^d[ií]a\s*\d+/i.test(line);
+
+    if (isNumericHeading) {
+      if (seenDayIndexes.has(heading.dayIndex)) break;
+      seenDayIndexes.add(heading.dayIndex);
+      currentDay = {
+        shortDay: heading.shortDay,
+        fullDay: heading.fullDay,
+        type: "Fuerza",
+        title: heading.title,
+        postCardio: "",
+        cardioProtocol: "",
+        exercises: [],
+      };
+      days.push(currentDay);
+      pendingSets = "";
+      needsSupplementalReps = false;
+      continue;
+    }
+
+    if (!currentDay) continue;
+
+    if (/^\+?\s*cardio\s*:/i.test(line)) {
+      currentDay.postCardio = line.replace(/^\+?\s*cardio\s*:/i, "").trim();
+      continue;
+    }
+
+    if (!currentDay.exercises.length && /^abs$/i.test(line)) {
+      currentDay.title = `${currentDay.title} ABS`.replace(/\+\s*ABS$/i, "+ ABS");
+      continue;
+    }
+
+    const seriesMatch = line.match(/^(\d+)\s+series$/i);
+    if (seriesMatch) {
+      pendingSets = seriesMatch[1];
+      continue;
+    }
+
+    if (/^\d+\.\s*/.test(line)) {
+      const parsed = parseStructuredExercise(line, pendingSets);
+      currentDay.exercises.push(parsed.exercise);
+      needsSupplementalReps = parsed.needsSupplementalReps;
+      pendingSets = "";
+      continue;
+    }
+
+    if (needsSupplementalReps && /^subm[aá]x/i.test(line)) {
+      currentDay.exercises[currentDay.exercises.length - 1].reps = line.trim();
+      needsSupplementalReps = false;
+    }
+  }
+
+  return normalizeRoutineDays(days);
 }
 
 function parseTextRoutine(text) {
@@ -306,6 +442,21 @@ function parseTextRoutine(text) {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
+
+  const routineMarkerIndex = lines.findIndex((line) => safeSlug(line) === "la_rutina");
+  const structuredHeadingIndexes = lines
+    .map((line, index) => ({ index, heading: resolveHeading(line) }))
+    .filter(({ heading, index }) => (
+      heading?.dayIndex >= 0
+      && /^d[ií]a\s*\d+/i.test(lines[index])
+    ));
+
+  if (routineMarkerIndex >= 0 || structuredHeadingIndexes.length >= 2) {
+    const startIndex = routineMarkerIndex >= 0
+      ? routineMarkerIndex + 1
+      : structuredHeadingIndexes[0].index;
+    return parseStructuredTextRoutine(lines.slice(startIndex));
+  }
 
   const days = [];
   let currentDay = null;

@@ -8,14 +8,17 @@ import { BrandLogo } from "./BrandLogo.jsx";
 // ============================================================================
 // 1. CONSTANTS + SUPABASE
 // ============================================================================
-const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL || "").trim();
+const SUPABASE_PROJECT_URL = (import.meta.env.VITE_SUPABASE_URL || "").trim();
 const SUPABASE_PUBLIC_KEY = (
   import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
   || import.meta.env.VITE_SUPABASE_ANON_KEY
   || ""
 ).trim();
 const SUPABASE_AUTH_REDIRECT_URL = (import.meta.env.VITE_SUPABASE_AUTH_REDIRECT_URL || "").trim();
-const SUPABASE_CONFIGURED = Boolean(SUPABASE_URL && SUPABASE_PUBLIC_KEY);
+const SUPABASE_CONFIGURED = Boolean(SUPABASE_PROJECT_URL && SUPABASE_PUBLIC_KEY);
+const SUPABASE_URL = SUPABASE_CONFIGURED && typeof window !== "undefined"
+  ? `${window.location.origin}/supabase`
+  : SUPABASE_PROJECT_URL;
 
 const supabase = SUPABASE_CONFIGURED
   ? createClient(SUPABASE_URL, SUPABASE_PUBLIC_KEY, {

@@ -1,4 +1,4 @@
-const CACHE_NAME = "anvil-cache-v4";
+const CACHE_NAME = "anvil-cache-v5";
 const URLS = ["/", "/manifest.webmanifest", "/icons/anvil-logo.png"];
 
 self.addEventListener("install", (event) => {
@@ -26,6 +26,9 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
+
+  // Auth and user data must always go to the network and must never enter the PWA cache.
+  if (url.pathname.startsWith("/supabase/")) return;
 
   // Network-first for HTML navigations avoids stale app shell after new deploys.
   if (event.request.mode === "navigate") {

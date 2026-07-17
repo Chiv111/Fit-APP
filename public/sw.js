@@ -1,4 +1,4 @@
-const CACHE_NAME = "anvil-cache-v5";
+const CACHE_NAME = "anvil-cache-v6";
 const URLS = ["/", "/manifest.webmanifest", "/icons/anvil-logo.png"];
 
 self.addEventListener("install", (event) => {

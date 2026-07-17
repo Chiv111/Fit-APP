@@ -1,13 +1,3 @@
-<svg width="512" height="512" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <linearGradient id="anvilBg" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#1f2530"/>
-      <stop offset="100%" stop-color="#0e1218"/>
-    </linearGradient>
-  </defs>
-  <circle cx="32" cy="32" r="30" fill="url(#anvilBg)" stroke="#ef4035" stroke-width="2.4"/>
-  <g stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" fill="none">
-    <path d="M 19 50 L 32 14 L 45 50"/>
-    <path d="M 25 38 L 39 38"/>
-  </g>
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <image href="/icons/anvil-logo.png?v=2" x="-101" y="-114" width="714" height="714" />
 </svg>

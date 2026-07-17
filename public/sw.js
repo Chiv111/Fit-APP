@@ -1,5 +1,13 @@
-const CACHE_NAME = "anvil-cache-v6";
-const URLS = ["/", "/manifest.webmanifest", "/icons/anvil-logo.png"];
+const CACHE_NAME = "anvil-cache-v7";
+const URLS = [
+  "/",
+  "/manifest.webmanifest?v=2",
+  "/icons/anvil-logo.png?v=2",
+  "/icons/icon-180.png?v=2",
+  "/icons/icon-192.png?v=2",
+  "/icons/icon-512.png?v=2",
+  "/icons/icon-maskable-512.png?v=2",
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(

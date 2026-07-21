@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="es">
+  <body style="margin:0;padding:0;background:#050405;color:#fffafa;font-family:Arial,Helvetica,sans-serif;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#050405;padding:28px 14px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:520px;background:#151214;border:1px solid #392d31;border-radius:18px;overflow:hidden;">
+            <tr><td style="height:5px;background:#f10d18;font-size:0;line-height:0;">&nbsp;</td></tr>
+            <tr>
+              <td style="padding:30px 28px 10px;">
+                <div style="color:#f10d18;font-size:13px;font-weight:800;letter-spacing:4px;">ANVIL</div>
+                <h1 style="margin:14px 0 8px;color:#fffafa;font-size:28px;line-height:1.15;">{{ if .Data.display_name }}Hola, {{ .Data.display_name }}.{{ else }}Tu entrenamiento empieza aquí.{{ end }}</h1>
+                <p style="margin:0;color:#c9bdc0;font-size:16px;line-height:1.55;">{{ .Data.invited_by_name }} te invitó a crear tu cuenta en Anvil.</p>
+              </td>
+            </tr>
+            {{ if .Data.invitation_message }}
+            <tr>
+              <td style="padding:12px 28px;">
+                <div style="padding:16px 18px;background:#21181b;border-left:3px solid #f10d18;border-radius:10px;color:#eee5e7;font-size:15px;line-height:1.55;">{{ .Data.invitation_message }}</div>
+              </td>
+            </tr>
+            {{ end }}
+            <tr>
+              <td style="padding:14px 28px 30px;">
+                <p style="margin:0 0 20px;color:#9d8f93;font-size:14px;line-height:1.55;">Acepta la invitación, crea tu contraseña y configura tu rutina. Tus datos y tu progreso serán privados para tu cuenta.</p>
+                <a href="{{ .ConfirmationURL }}" style="display:inline-block;background:#f10d18;color:#ffffff;text-decoration:none;font-size:15px;font-weight:800;padding:14px 22px;border-radius:12px;">Crear mi cuenta</a>
+                <p style="margin:22px 0 0;color:#74676b;font-size:12px;line-height:1.5;">Si no esperabas esta invitación, puedes ignorar este correo.</p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

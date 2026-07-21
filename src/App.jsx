@@ -16,6 +16,7 @@ const SUPABASE_PUBLIC_KEY = (
 ).trim();
 const SUPABASE_AUTH_REDIRECT_URL = (import.meta.env.VITE_SUPABASE_AUTH_REDIRECT_URL || "").trim();
 const SUPABASE_CONFIGURED = Boolean(SUPABASE_PROJECT_URL && SUPABASE_PUBLIC_KEY);
+const INVITE_ADMIN_EMAIL = "sebastianrdzj@gmail.com";
 const SUPABASE_URL = SUPABASE_CONFIGURED && typeof window !== "undefined"
   ? `${window.location.origin}/supabase`
   : SUPABASE_PROJECT_URL;
@@ -33,7 +34,6 @@ const BACKUP_KEY_PREFIX = "fitapp_backups_v4";
 const DRAFT_KEY_PREFIX = "fitapp_drafts_v4";
 const SYNC_QUEUE_KEY_PREFIX = "fitapp_sync_queue_v4";
 const DEVICE_ID_KEY = "fitapp_device_id_v1";
-const AUTH_LOCAL_MODE_KEY = "fitapp_auth_local_mode_v1";
 const DEVICE_IMPORT_FLAG_PREFIX = "fitapp_device_imported_v1";
 const LEGACY_STATE_KEYS = ["lockin_state_v3", "lockin_state_v2", "lockin_state_v1", "fit_app_state_v6", "fit_app_state_v5"];
 const LEGACY_BACKUP_KEYS = ["lockin_backups_v3", "lockin_backups_v2", "lockin_backups_v1"];
@@ -43,6 +43,23 @@ const CLOUD_SYNC_DEBOUNCE_MS = 1500;
 const SYNC_MAX_RETRIES = 8;
 const AUTO_BACKUP_MS = 1000 * 60 * 60 * 6;
 const MAX_BACKUPS = 30;
+
+function urlHasInviteMarker() {
+  if (typeof window === "undefined") return false;
+  const query = new URLSearchParams(window.location.search);
+  const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  return query.get("invite") === "1" || hash.get("type") === "invite";
+}
+
+function clearInviteMarker() {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  url.searchParams.delete("invite");
+  const hash = new URLSearchParams(url.hash.replace(/^#/, ""));
+  hash.delete("type");
+  url.hash = hash.toString() ? `#${hash.toString()}` : "";
+  window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`);
+}
 
 const TABS = [
   ["hoy", "Hoy"],
@@ -1353,7 +1370,7 @@ function MiniLineChart({ points, color = "#d83b2d", height = 120 }) {
   );
 }
 
-function AuthScreen({ supabaseConfigured, authMessage = "", onContinueLocal }) {
+function AuthScreen({ supabaseConfigured, authMessage = "" }) {
   const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -1476,14 +1493,9 @@ function AuthScreen({ supabaseConfigured, authMessage = "", onContinueLocal }) {
             </div>
           </div>
           <p className="gate-sub">
-            En este momento no se puede iniciar sesión. Puedes seguir usando tus datos en este dispositivo.
+            En este momento no se puede iniciar sesión. Vuelve a intentarlo cuando la conexión esté disponible.
           </p>
           {authMessage && <p className="error-text">{authMessage}</p>}
-          {onContinueLocal && (
-            <button className="btn btn-primary btn-large top-10" type="button" onClick={onContinueLocal}>
-              Usar este dispositivo
-            </button>
-          )}
         </div>
       </div>
     );
@@ -1566,11 +1578,6 @@ function AuthScreen({ supabaseConfigured, authMessage = "", onContinueLocal }) {
               {resendingConfirmation ? "Enviando..." : "Reenviar confirmación"}
             </button>
           </div>
-        )}
-        {onContinueLocal && (
-          <button type="button" className="btn btn-ghost btn-large top-10" onClick={onContinueLocal}>
-            Entrar sin cuenta
-          </button>
         )}
       </div>
     </div>
@@ -1703,7 +1710,7 @@ function formatTimerTime(totalSec) {
   return `${m}:${String(r).padStart(2, "0")}`;
 }
 
-function PasswordRecoveryScreen({ email, onComplete, onCancel }) {
+function PasswordRecoveryScreen({ email, isInvite = false, onComplete, onCancel }) {
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -1744,15 +1751,21 @@ function PasswordRecoveryScreen({ email, onComplete, onCancel }) {
         <div className="auth-brand">
           <BrandLogo size={56} />
           <div>
-            <p className="gate-tag">CUENTA SEGURA</p>
-            <h1>Nueva contraseña</h1>
+            <p className="gate-tag">{isInvite ? "BIENVENIDO A ANVIL" : "CUENTA SEGURA"}</p>
+            <h1>{isInvite ? "Crea tu contraseña" : "Nueva contraseña"}</h1>
           </div>
         </div>
-        <p className="gate-sub">{email || "Tu cuenta"}</p>
+        <p className="gate-sub">
+          {isInvite
+            ? `Activa ${email || "tu cuenta"} para comenzar tu entrenamiento.`
+            : email || "Tu cuenta"}
+        </p>
         {saved ? (
           <div className="stack gap-10 top-12">
-            <p className="trend">✓ Contraseña actualizada correctamente.</p>
-            <button className="btn btn-primary btn-large" type="button" onClick={onComplete}>Entrar a Anvil</button>
+            <p className="trend">✓ {isInvite ? "Cuenta activada correctamente." : "Contraseña actualizada correctamente."}</p>
+            <button className="btn btn-primary btn-large" type="button" onClick={onComplete}>
+              {isInvite ? "Configurar mi rutina" : "Entrar a Anvil"}
+            </button>
           </div>
         ) : (
           <div className="stack gap-10 top-12">
@@ -2233,20 +2246,19 @@ export default function App() {
   const [authSession, setAuthSession] = useState(null);
   const [authError, setAuthError] = useState("");
   const [passwordRecoveryMode, setPasswordRecoveryMode] = useState(false);
-  const [localMode, setLocalMode] = useState(() => SUPABASE_CONFIGURED && safeLocalGet(AUTH_LOCAL_MODE_KEY) === "true");
+  const [inviteAcceptanceMode, setInviteAcceptanceMode] = useState(urlHasInviteMarker);
   const userId = authSession?.user?.id || null;
   const hasCloudAccount = SUPABASE_CONFIGURED && Boolean(userId);
-  const usingLocalMode = SUPABASE_CONFIGURED && !userId && localMode;
-  const scope = hasCloudAccount ? userId : (!SUPABASE_CONFIGURED || usingLocalMode ? LOCAL_SCOPE : null);
+  const scope = hasCloudAccount ? userId : (!SUPABASE_CONFIGURED ? LOCAL_SCOPE : null);
 
   // App state
   const [state, setState] = useState(() =>
-    SUPABASE_CONFIGURED && !localMode
+    SUPABASE_CONFIGURED
       ? alignStateSessionToToday(normalizeState(DEFAULT_STATE))
       : alignStateSessionToToday(loadLocalState(LOCAL_SCOPE))
   );
   const [draftLogs, setDraftLogs] = useState(() =>
-    SUPABASE_CONFIGURED && !localMode ? {} : loadDrafts(LOCAL_SCOPE)
+    SUPABASE_CONFIGURED ? {} : loadDrafts(LOCAL_SCOPE)
   );
   const [saveMeta, setSaveMeta] = useState({ ok: true, error: null, backupCount: 0, lastSavedAt: null, lastBackupAt: null });
   const [cloudMeta, setCloudMeta] = useState({
@@ -2303,6 +2315,14 @@ export default function App() {
   const [importError, setImportError] = useState("");
   const [importFileName, setImportFileName] = useState("");
   const [deviceStateCandidate, setDeviceStateCandidate] = useState(null);
+  const [inviteForm, setInviteForm] = useState({
+    name: "",
+    email: "",
+    message: "Te invito a usar Anvil para registrar tus rutinas y ver tu progreso sin complicaciones.",
+  });
+  const [inviteSubmitting, setInviteSubmitting] = useState(false);
+  const [inviteError, setInviteError] = useState("");
+  const [inviteSuccess, setInviteSuccess] = useState("");
 
   const deviceStateSummary = useMemo(
     () => summarizeDeviceState(deviceStateCandidate),
@@ -2350,11 +2370,13 @@ export default function App() {
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
       setAuthSession(session || null);
       if (event === "PASSWORD_RECOVERY") setPasswordRecoveryMode(true);
-      if (event === "SIGNED_OUT") setPasswordRecoveryMode(false);
+      if (event === "SIGNED_IN" && urlHasInviteMarker()) setInviteAcceptanceMode(true);
+      if (event === "SIGNED_OUT") {
+        setPasswordRecoveryMode(false);
+        setInviteAcceptanceMode(false);
+      }
       if (session) {
         setAuthError("");
-        setLocalMode(false);
-        safeLocalRemove(AUTH_LOCAL_MODE_KEY);
       }
     });
     return () => {
@@ -3662,19 +3684,7 @@ export default function App() {
     }));
   };
 
-  const enterLocalMode = () => {
-    setAuthError("");
-    setLocalMode(true);
-    safeLocalSet(AUTH_LOCAL_MODE_KEY, "true");
-  };
-
-  const showLogin = () => {
-    setLocalMode(false);
-    safeLocalRemove(AUTH_LOCAL_MODE_KEY);
-  };
-
   const signOut = async () => {
-    showLogin();
     if (!supabase) return;
     await supabase.auth.signOut();
   };
@@ -3690,6 +3700,57 @@ export default function App() {
       return;
     }
     window.alert("Te enviamos un enlace seguro para crear o cambiar tu contraseña.");
+  };
+
+  const canInviteUsers = hasCloudAccount
+    && String(authSession?.user?.email || "").trim().toLowerCase() === INVITE_ADMIN_EMAIL;
+
+  const sendInvitation = async (event) => {
+    event.preventDefault();
+    setInviteError("");
+    setInviteSuccess("");
+
+    const email = inviteForm.email.trim().toLowerCase();
+    const name = inviteForm.name.trim();
+    const message = inviteForm.message.trim();
+
+    if (!canInviteUsers || !supabase) {
+      setInviteError("Tu cuenta no tiene permiso para enviar invitaciones.");
+      return;
+    }
+    if (!/^\S+@\S+\.\S+$/.test(email)) {
+      setInviteError("Escribe un correo válido.");
+      return;
+    }
+    if (message.length > 280) {
+      setInviteError("El mensaje debe tener máximo 280 caracteres.");
+      return;
+    }
+
+    setInviteSubmitting(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("invite-user", {
+        body: { email, name, message },
+      });
+
+      let responseMessage = data?.message || "";
+      if (error?.context && typeof error.context.clone === "function") {
+        try {
+          const errorBody = await error.context.clone().json();
+          responseMessage = errorBody?.message || responseMessage;
+        } catch {
+          // La respuesta puede no incluir JSON.
+        }
+      }
+      if (error) throw new Error(responseMessage || error.message || "No se pudo enviar la invitación.");
+
+      setInviteSuccess(`Invitación enviada a ${email}.`);
+      setInviteForm((current) => ({ ...current, name: "", email: "" }));
+    } catch (caught) {
+      setInviteError(normalizeAuthUiError(caught));
+    } finally {
+      setInviteSubmitting(false);
+    }
   };
 
   const completeOnboarding = ({ profileName, preferences, routine, source, openEditor }) => {
@@ -3736,7 +3797,7 @@ export default function App() {
   // ==========================================================================
   // Render gates
   // ==========================================================================
-  if (SUPABASE_CONFIGURED && !authReady && !usingLocalMode) {
+  if (SUPABASE_CONFIGURED && !authReady) {
     return (
       <div className="gate-shell gate-overlay">
         <div className="gate-card">
@@ -3748,21 +3809,28 @@ export default function App() {
     );
   }
 
-  if (SUPABASE_CONFIGURED && passwordRecoveryMode && userId) {
+  if (SUPABASE_CONFIGURED && (passwordRecoveryMode || inviteAcceptanceMode) && userId) {
     return (
       <PasswordRecoveryScreen
         email={authSession?.user?.email}
-        onComplete={() => setPasswordRecoveryMode(false)}
+        isInvite={inviteAcceptanceMode}
+        onComplete={() => {
+          setPasswordRecoveryMode(false);
+          setInviteAcceptanceMode(false);
+          clearInviteMarker();
+        }}
         onCancel={async () => {
           setPasswordRecoveryMode(false);
+          setInviteAcceptanceMode(false);
+          clearInviteMarker();
           await signOut();
         }}
       />
     );
   }
 
-  if (SUPABASE_CONFIGURED && !userId && !usingLocalMode) {
-    return <AuthScreen supabaseConfigured authMessage={authError} onContinueLocal={enterLocalMode} />;
+  if (SUPABASE_CONFIGURED && !userId) {
+    return <AuthScreen supabaseConfigured authMessage={authError} />;
   }
 
   if (hasCloudAccount && !cloudReady) {
@@ -4576,6 +4644,57 @@ export default function App() {
             </div>
           </article>
 
+          {canInviteUsers && (
+            <article className="card invite-card top-12">
+              <div className="invite-card-head">
+                <div>
+                  <p className="invite-kicker">ACCESO ADMINISTRADOR</p>
+                  <h4>Invitar a Anvil</h4>
+                </div>
+                <span className="invite-icon" aria-hidden="true">+</span>
+              </div>
+              <p className="muted small top-6">
+                La persona recibirá un correo para crear su contraseña y después configurará su rutina.
+              </p>
+              <form className="stack gap-10 top-12" onSubmit={sendInvitation}>
+                <div className="grid-two invite-fields">
+                  <Field
+                    label="Nombre"
+                    value={inviteForm.name}
+                    onChange={(value) => setInviteForm((current) => ({ ...current, name: value }))}
+                    placeholder="Nombre del invitado"
+                    autoComplete="off"
+                  />
+                  <Field
+                    label="Correo"
+                    type="email"
+                    value={inviteForm.email}
+                    onChange={(value) => setInviteForm((current) => ({ ...current, email: value }))}
+                    placeholder="persona@correo.com"
+                    autoComplete="off"
+                  />
+                </div>
+                <label className="field">
+                  <span>Mensaje personal</span>
+                  <textarea
+                    className="input invite-message"
+                    rows={4}
+                    maxLength={280}
+                    value={inviteForm.message}
+                    onChange={(event) => setInviteForm((current) => ({ ...current, message: event.target.value }))}
+                    placeholder="Cuéntale por qué le servirá Anvil"
+                  />
+                  <small className="invite-counter">{inviteForm.message.length}/280</small>
+                </label>
+                {inviteError && <p className="error-text">{inviteError}</p>}
+                {inviteSuccess && <p className="trend">✓ {inviteSuccess}</p>}
+                <button className="btn btn-primary btn-large" type="submit" disabled={inviteSubmitting}>
+                  {inviteSubmitting ? "Enviando..." : "Enviar invitación"}
+                </button>
+              </form>
+            </article>
+          )}
+
           {hasCloudAccount && (
             <article className="card top-12">
               <h4>Cuenta</h4>
@@ -4583,16 +4702,6 @@ export default function App() {
               <div className="row gap-8 wrap top-10">
                 <button className="btn btn-soft" type="button" onClick={sendPasswordSetupLink}>Cambiar contraseña</button>
                 <button className="btn btn-danger" type="button" onClick={signOut}>Cerrar sesión</button>
-              </div>
-            </article>
-          )}
-
-          {SUPABASE_CONFIGURED && usingLocalMode && (
-            <article className="card top-12">
-              <h4>Cuenta</h4>
-              <p className="muted top-6">Estás usando la app en este dispositivo.</p>
-              <div className="row gap-8 wrap top-10">
-                <button className="btn btn-primary" type="button" onClick={showLogin}>Iniciar sesión</button>
               </div>
             </article>
           )}

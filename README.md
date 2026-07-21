@@ -38,6 +38,17 @@ supabase db push --linked
 
 Las migraciones versionadas están en `supabase/migrations/`.
 
+### Invitaciones administradas
+
+La función `supabase/functions/invite-user` permite enviar invitaciones desde Ajustes. La función exige una sesión válida y vuelve a comprobar en el servidor que el correo del remitente esté incluido en `INVITE_ADMIN_EMAILS`; la clave administrativa de Supabase nunca llega al navegador.
+
+```bash
+supabase secrets set INVITE_ADMIN_EMAILS=sebastianrdzj@gmail.com ANVIL_APP_URL=https://fit-app-lac.vercel.app
+supabase functions deploy invite-user --project-ref boejvavrpolvtabunddo --use-api
+```
+
+La plantilla de correo está en `supabase/templates/invite.html`. En el proyecto hospedado se configura como plantilla **Invite user**, con asunto `Tu invitación a Anvil`. Al aceptar, la persona crea su contraseña y continúa al onboarding para configurar o importar su rutina.
+
 ### Recuperación y exportación
 
 En Ajustes → Tus datos, cada persona puede:

@@ -27,10 +27,12 @@ const supabase = SUPABASE_CONFIGURED
   : null;
 
 const CLOUD_TABLE = "lockin_state_user";
+const CLOUD_REVISIONS_TABLE = "lockin_state_revisions";
 const STATE_KEY_PREFIX = "fitapp_state_v4";
 const BACKUP_KEY_PREFIX = "fitapp_backups_v4";
 const DRAFT_KEY_PREFIX = "fitapp_drafts_v4";
 const SYNC_QUEUE_KEY_PREFIX = "fitapp_sync_queue_v4";
+const DEVICE_ID_KEY = "fitapp_device_id_v1";
 const AUTH_LOCAL_MODE_KEY = "fitapp_auth_local_mode_v1";
 const DEVICE_IMPORT_FLAG_PREFIX = "fitapp_device_imported_v1";
 const LEGACY_STATE_KEYS = ["lockin_state_v3", "lockin_state_v2", "lockin_state_v1", "fit_app_state_v6", "fit_app_state_v5"];
@@ -156,6 +158,11 @@ function formatDateTimeInZone(input, tz) {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function formatIsoTimestamp(input) {
+  const date = new Date(Number(input));
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString();
 }
 
 function msUntilNextMidnightInZone(tz, now = new Date()) {
@@ -882,6 +889,16 @@ function safeLocalRemove(key) {
   try { window.localStorage.removeItem(key); return true; } catch { return false; }
 }
 
+function getOrCreateDeviceId() {
+  const existing = safeLocalGet(DEVICE_ID_KEY);
+  if (existing) return existing;
+  const generated = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : makeId("device");
+  safeLocalSet(DEVICE_ID_KEY, generated);
+  return generated;
+}
+
 function scopedKey(prefix, scope) {
   return `${prefix}_${scope || LOCAL_SCOPE}`;
 }
@@ -924,15 +941,6 @@ function loadLocalState(scope) {
 
   if (!loaded) {
     loaded = normalizeState(DEFAULT_STATE);
-  }
-
-  // Apply Elite 2.0 migration (V2 flag to force upgrade)
-  const migrationFlag = `fitapp_migrated_to_elite_2_0_v2_${scope || LOCAL_SCOPE}`;
-  if (safeLocalGet(migrationFlag) !== "true") {
-    loaded.routine = DEFAULT_ROUTINE;
-    loaded.updatedAt = new Date().toISOString();
-    safeLocalSet(scopedKey(STATE_KEY_PREFIX, scope || LOCAL_SCOPE), JSON.stringify(loaded));
-    safeLocalSet(migrationFlag, "true");
   }
 
   return loaded;
@@ -1083,10 +1091,11 @@ function saveDrafts(drafts, scope) {
 function loadSyncQueue(scope) {
   const parsed = parseJson(safeLocalGet(scopedKey(SYNC_QUEUE_KEY_PREFIX, scope)), null);
   if (!parsed || typeof parsed !== "object") {
-    return { pending: null, retries: 0, lastError: null, updatedAt: null };
+    return { pending: null, expectedVersion: null, retries: 0, lastError: null, updatedAt: null };
   }
   return {
     pending: parsed.pending && typeof parsed.pending === "object" ? normalizeState(parsed.pending) : null,
+    expectedVersion: Number.isInteger(Number(parsed.expectedVersion)) ? Number(parsed.expectedVersion) : null,
     retries: Number(parsed.retries) || 0,
     lastError: parsed.lastError || null,
     updatedAt: parsed.updatedAt || null,
@@ -1101,36 +1110,103 @@ function saveSyncQueue(queue, scope) {
 // 6. CLOUD SYNC
 // ============================================================================
 async function fetchCloudState(userId) {
-  if (!supabase || !userId) return { ok: false, reason: "disabled", payload: null, cloudUpdatedAt: null };
+  if (!supabase || !userId) {
+    return { ok: false, reason: "disabled", payload: null, cloudUpdatedAt: null, stateVersion: 0 };
+  }
   const { data, error } = await supabase
     .from(CLOUD_TABLE)
-    .select("payload,updated_at")
+    .select("payload,updated_at,state_version")
     .eq("user_id", userId)
     .maybeSingle();
 
-  if (error) return { ok: false, reason: error.message, payload: null, cloudUpdatedAt: null };
+  if (error) {
+    return { ok: false, reason: error.message, payload: null, cloudUpdatedAt: null, stateVersion: 0 };
+  }
   if (!data?.payload || typeof data.payload !== "object") {
-    return { ok: true, reason: null, payload: null, cloudUpdatedAt: data?.updated_at || null };
+    return {
+      ok: true,
+      reason: null,
+      payload: null,
+      cloudUpdatedAt: data?.updated_at || null,
+      stateVersion: Number(data?.state_version) || 0,
+    };
   }
   return {
     ok: true,
     reason: null,
     payload: normalizeState(data.payload),
     cloudUpdatedAt: data?.updated_at || null,
+    stateVersion: Number(data?.state_version) || 0,
   };
 }
 
-async function pushCloudState(payload, userId) {
-  if (!supabase || !userId) return { ok: false, reason: "disabled", cloudUpdatedAt: null };
-  const row = { payload, updated_at: new Date().toISOString(), user_id: userId };
+async function pushCloudState(payload, userId, expectedVersion, deviceId, force = false) {
+  if (!supabase || !userId) {
+    return { ok: false, reason: "disabled", cloudUpdatedAt: null, stateVersion: 0, conflict: false };
+  }
   const { data, error } = await supabase
-    .from(CLOUD_TABLE)
-    .upsert(row, { onConflict: "user_id" })
-    .select("updated_at")
+    .rpc("save_lockin_state", {
+      p_payload: payload,
+      p_expected_version: Number(expectedVersion) || 0,
+      p_device_id: deviceId || null,
+      p_force: Boolean(force),
+    })
     .single();
 
-  if (error) return { ok: false, reason: error.message, cloudUpdatedAt: null };
-  return { ok: true, reason: null, cloudUpdatedAt: data?.updated_at || null };
+  if (error) {
+    return { ok: false, reason: error.message, cloudUpdatedAt: null, stateVersion: 0, conflict: false };
+  }
+  return {
+    ok: true,
+    reason: null,
+    saved: Boolean(data?.saved),
+    conflict: Boolean(data?.conflict),
+    cloudUpdatedAt: data?.state_updated_at || null,
+    stateVersion: Number(data?.state_version) || 0,
+    payload: data?.state_payload && typeof data.state_payload === "object"
+      ? normalizeState(data.state_payload)
+      : null,
+  };
+}
+
+async function fetchCloudRevisions(userId) {
+  if (!supabase || !userId) return { ok: false, reason: "disabled", revisions: [] };
+  const { data, error } = await supabase
+    .from(CLOUD_REVISIONS_TABLE)
+    .select("revision_id,state_version,reason,created_at")
+    .eq("user_id", userId)
+    .order("state_version", { ascending: false })
+    .limit(20);
+
+  if (error) return { ok: false, reason: error.message, revisions: [] };
+  return { ok: true, reason: null, revisions: Array.isArray(data) ? data : [] };
+}
+
+async function restoreCloudStateRevision(revisionId, expectedVersion) {
+  if (!supabase) {
+    return { ok: false, reason: "disabled", cloudUpdatedAt: null, stateVersion: 0, conflict: false };
+  }
+  const { data, error } = await supabase
+    .rpc("restore_lockin_state", {
+      p_revision_id: revisionId,
+      p_expected_version: Number(expectedVersion) || 0,
+    })
+    .single();
+
+  if (error) {
+    return { ok: false, reason: error.message, cloudUpdatedAt: null, stateVersion: 0, conflict: false };
+  }
+  return {
+    ok: true,
+    reason: null,
+    saved: Boolean(data?.saved),
+    conflict: Boolean(data?.conflict),
+    cloudUpdatedAt: data?.state_updated_at || null,
+    stateVersion: Number(data?.state_version) || 0,
+    payload: data?.state_payload && typeof data.state_payload === "object"
+      ? normalizeState(data.state_payload)
+      : null,
+  };
 }
 
 // ============================================================================
@@ -2176,20 +2252,28 @@ export default function App() {
   const [cloudMeta, setCloudMeta] = useState({
     enabled: SUPABASE_CONFIGURED,
     syncedAt: null,
+    stateVersion: 0,
     syncing: false,
     error: null,
     queueCount: 0,
     retries: 0,
     conflict: null,
   });
+  const [cloudRevisions, setCloudRevisions] = useState([]);
+  const [cloudRevisionsOpen, setCloudRevisionsOpen] = useState(false);
+  const [cloudRevisionsLoading, setCloudRevisionsLoading] = useState(false);
   const [cloudReady, setCloudReady] = useState(!SUPABASE_CONFIGURED);
   const [isOnline, setIsOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
 
   const cloudSyncTimerRef = useRef(null);
   const cloudRetryTimerRef = useRef(null);
+  const cloudSyncInFlightRef = useRef(false);
   const pendingCloudPayloadRef = useRef({ pending: null, retries: 0, lastError: null, updatedAt: null });
   const knownCloudUpdatedAtRef = useRef(null);
+  const knownCloudVersionRef = useRef(0);
   const forceCloudOverwriteRef = useRef(false);
+  const suppressNextCloudQueueRef = useRef(false);
+  const deviceIdRef = useRef(getOrCreateDeviceId());
 
   // UI state
   const [tab, setTab] = useState("hoy");
@@ -2324,15 +2408,9 @@ export default function App() {
       const cloudUpdatedAt = Date.parse(cloud.cloudUpdatedAt || "") || 0;
 
       knownCloudUpdatedAtRef.current = cloud.cloudUpdatedAt || null;
+      knownCloudVersionRef.current = cloud.stateVersion || 0;
       let finalState = (cloud.payload && cloudUpdatedAt > localUpdatedAt) ? cloud.payload : localRaw;
       finalState = alignStateSessionToToday(normalizeState(finalState));
-
-      const migrationFlag = `fitapp_migrated_to_elite_2_0_v2_${userId}`;
-      if (safeLocalGet(migrationFlag) !== "true") {
-        finalState.routine = DEFAULT_ROUTINE;
-        finalState.updatedAt = new Date().toISOString();
-        safeLocalSet(migrationFlag, "true");
-      }
 
       setState(finalState);
       setSaveMeta(saveLocalState(finalState, userId));
@@ -2340,6 +2418,7 @@ export default function App() {
         ...prev,
         enabled: true,
         syncedAt: cloud.cloudUpdatedAt || prev.syncedAt,
+        stateVersion: cloud.stateVersion || 0,
         syncing: false,
         error: null,
         queueCount: pendingCloudPayloadRef.current?.pending ? 1 : 0,
@@ -2368,8 +2447,13 @@ export default function App() {
   // ==========================================================================
   useEffect(() => {
     if (!SUPABASE_CONFIGURED || !userId || !cloudReady) return undefined;
+    if (suppressNextCloudQueueRef.current) {
+      suppressNextCloudQueueRef.current = false;
+      return undefined;
+    }
     const queue = {
       pending: normalizeState(state),
+      expectedVersion: knownCloudVersionRef.current || 0,
       retries: 0,
       lastError: null,
       updatedAt: new Date().toISOString(),
@@ -2386,6 +2470,12 @@ export default function App() {
     const scheduleAttempt = (delayMs) => {
       if (cloudSyncTimerRef.current) clearTimeout(cloudSyncTimerRef.current);
       cloudSyncTimerRef.current = setTimeout(async () => {
+        if (cloudSyncInFlightRef.current) {
+          scheduleAttempt(250);
+          return;
+        }
+        cloudSyncInFlightRef.current = true;
+        try {
         const queue = pendingCloudPayloadRef.current;
         if (!queue?.pending) {
           setCloudMeta((prev) => ({ ...prev, syncing: false, queueCount: 0 }));
@@ -2399,40 +2489,13 @@ export default function App() {
         }
 
         setCloudMeta((prev) => ({ ...prev, syncing: true, error: null }));
-        const remote = await fetchCloudState(userId);
-        if (!remote.ok) {
-          const retries = Math.min((queue.retries || 0) + 1, SYNC_MAX_RETRIES);
-          const nextQueue = { ...queue, retries, lastError: remote.reason || "Error de lectura" };
-          pendingCloudPayloadRef.current = nextQueue;
-          saveSyncQueue(nextQueue, userId);
-          const retryDelay = Math.min(30000, 1200 * (2 ** retries));
-          setCloudMeta((prev) => ({
-            ...prev,
-            syncing: false,
-            queueCount: 1,
-            retries,
-            error: `No se pudieron actualizar tus datos. Reintentando en ${Math.round(retryDelay / 1000)}s.`,
-          }));
-          if (cloudRetryTimerRef.current) clearTimeout(cloudRetryTimerRef.current);
-          cloudRetryTimerRef.current = setTimeout(() => scheduleAttempt(1000), retryDelay);
-          return;
-        }
-
-        const remoteUpdatedAt = Date.parse(remote.cloudUpdatedAt || "") || 0;
-        const knownUpdatedAt = Date.parse(knownCloudUpdatedAtRef.current || "") || 0;
-        const localUpdatedAt = Date.parse(queue.pending?.updatedAt || "") || 0;
-        const hasRemoteConflict = remoteUpdatedAt > knownUpdatedAt + 500 && remoteUpdatedAt > localUpdatedAt + 500;
-        if (hasRemoteConflict && !forceCloudOverwriteRef.current) {
-          setCloudMeta((prev) => ({
-            ...prev,
-            syncing: false,
-            conflict: { remoteUpdatedAt: remote.cloudUpdatedAt, localUpdatedAt: queue.pending?.updatedAt || null },
-            error: "Hay cambios más recientes en tu cuenta.",
-          }));
-          return;
-        }
-
-        const response = await pushCloudState(queue.pending, userId);
+        const response = await pushCloudState(
+          queue.pending,
+          userId,
+          queue.expectedVersion ?? knownCloudVersionRef.current,
+          deviceIdRef.current,
+          forceCloudOverwriteRef.current
+        );
         if (!response.ok) {
           const retries = Math.min((queue.retries || 0) + 1, SYNC_MAX_RETRIES);
           const nextQueue = { ...queue, retries, lastError: response.reason || "Error de sync" };
@@ -2451,19 +2514,76 @@ export default function App() {
           return;
         }
 
+        if (response.conflict) {
+          setCloudMeta((prev) => ({
+            ...prev,
+            syncing: false,
+            stateVersion: response.stateVersion || prev.stateVersion,
+            conflict: {
+              remoteUpdatedAt: response.cloudUpdatedAt,
+              remoteVersion: response.stateVersion,
+              remotePayload: response.payload,
+              localUpdatedAt: queue.updatedAt || null,
+            },
+            error: "Hay cambios guardados desde otro dispositivo.",
+          }));
+          return;
+        }
+
         forceCloudOverwriteRef.current = false;
         knownCloudUpdatedAtRef.current = response.cloudUpdatedAt || new Date().toISOString();
-        pendingCloudPayloadRef.current = { pending: null, retries: 0, lastError: null, updatedAt: null };
+        knownCloudVersionRef.current = response.stateVersion || knownCloudVersionRef.current;
+        const latestQueue = pendingCloudPayloadRef.current;
+        const hasNewerPending = Boolean(
+          latestQueue?.pending
+          && latestQueue.updatedAt
+          && latestQueue.updatedAt !== queue.updatedAt
+        );
+
+        if (hasNewerPending) {
+          const nextQueue = {
+            ...latestQueue,
+            expectedVersion: knownCloudVersionRef.current,
+            retries: 0,
+            lastError: null,
+          };
+          pendingCloudPayloadRef.current = nextQueue;
+          saveSyncQueue(nextQueue, userId);
+          setCloudMeta((prev) => ({
+            ...prev,
+            syncing: false,
+            syncedAt: response.cloudUpdatedAt || new Date().toISOString(),
+            stateVersion: knownCloudVersionRef.current,
+            error: null,
+            queueCount: 1,
+            retries: 0,
+            conflict: null,
+          }));
+          scheduleAttempt(CLOUD_SYNC_DEBOUNCE_MS);
+          return;
+        }
+
+        pendingCloudPayloadRef.current = {
+          pending: null,
+          expectedVersion: knownCloudVersionRef.current,
+          retries: 0,
+          lastError: null,
+          updatedAt: null,
+        };
         saveSyncQueue(pendingCloudPayloadRef.current, userId);
         setCloudMeta((prev) => ({
           ...prev,
           syncing: false,
           syncedAt: response.cloudUpdatedAt || new Date().toISOString(),
+          stateVersion: knownCloudVersionRef.current,
           error: null,
           queueCount: 0,
           retries: 0,
           conflict: null,
         }));
+        } finally {
+          cloudSyncInFlightRef.current = false;
+        }
       }, delayMs);
     };
 
@@ -3307,11 +3427,31 @@ export default function App() {
   const useCloudVersion = async () => {
     if (!userId) return;
     const remote = await fetchCloudState(userId);
-    if (!remote.ok || !remote.payload) return;
+    if (!remote.ok || !remote.payload) {
+      setCloudMeta((prev) => ({ ...prev, error: remote.reason || "No se pudo recuperar la versión guardada." }));
+      return;
+    }
+    suppressNextCloudQueueRef.current = true;
     setState(remote.payload);
     setSaveMeta(saveLocalState(remote.payload, userId, true));
     knownCloudUpdatedAtRef.current = remote.cloudUpdatedAt || knownCloudUpdatedAtRef.current;
-    setCloudMeta((prev) => ({ ...prev, conflict: null, error: null, syncedAt: remote.cloudUpdatedAt || prev.syncedAt }));
+    knownCloudVersionRef.current = remote.stateVersion || 0;
+    pendingCloudPayloadRef.current = {
+      pending: null,
+      expectedVersion: knownCloudVersionRef.current,
+      retries: 0,
+      lastError: null,
+      updatedAt: null,
+    };
+    saveSyncQueue(pendingCloudPayloadRef.current, userId);
+    setCloudMeta((prev) => ({
+      ...prev,
+      conflict: null,
+      error: null,
+      queueCount: 0,
+      stateVersion: knownCloudVersionRef.current,
+      syncedAt: remote.cloudUpdatedAt || prev.syncedAt,
+    }));
   };
 
   const overwriteCloudVersion = () => {
@@ -3320,49 +3460,188 @@ export default function App() {
     setState((prev) => ({ ...prev }));
   };
 
+  const loadCloudRevisions = async () => {
+    if (!userId) return;
+    setCloudRevisionsLoading(true);
+    const response = await fetchCloudRevisions(userId);
+    setCloudRevisionsLoading(false);
+    if (!response.ok) {
+      setCloudMeta((prev) => ({ ...prev, error: response.reason || "No se pudo cargar el historial de recuperación." }));
+      return;
+    }
+    setCloudRevisions(response.revisions);
+  };
+
+  const toggleCloudRevisions = async () => {
+    const nextOpen = !cloudRevisionsOpen;
+    setCloudRevisionsOpen(nextOpen);
+    if (nextOpen) await loadCloudRevisions();
+  };
+
+  const restoreServerRevision = async (revision) => {
+    if (!userId || !revision?.revision_id) return;
+    const label = formatDateTimeInZone(revision.created_at, tz);
+    if (!window.confirm(`¿Restaurar la copia de ${label}? Tu estado actual también quedará guardado en el historial.`)) return;
+
+    setCloudRevisionsLoading(true);
+    const response = await restoreCloudStateRevision(revision.revision_id, knownCloudVersionRef.current);
+    setCloudRevisionsLoading(false);
+    if (!response.ok) {
+      setCloudMeta((prev) => ({ ...prev, error: response.reason || "No se pudo restaurar esa versión." }));
+      return;
+    }
+    if (response.conflict || !response.payload) {
+      setCloudMeta((prev) => ({
+        ...prev,
+        conflict: {
+          remoteUpdatedAt: response.cloudUpdatedAt,
+          remoteVersion: response.stateVersion,
+          remotePayload: response.payload,
+          localUpdatedAt: null,
+        },
+        error: "La cuenta cambió en otro dispositivo. Revisa el conflicto antes de restaurar.",
+      }));
+      return;
+    }
+
+    knownCloudUpdatedAtRef.current = response.cloudUpdatedAt;
+    knownCloudVersionRef.current = response.stateVersion;
+    pendingCloudPayloadRef.current = {
+      pending: null,
+      expectedVersion: response.stateVersion,
+      retries: 0,
+      lastError: null,
+      updatedAt: null,
+    };
+    saveSyncQueue(pendingCloudPayloadRef.current, userId);
+    suppressNextCloudQueueRef.current = true;
+    setState(response.payload);
+    setSaveMeta(saveLocalState(response.payload, userId, true));
+    setCloudMeta((prev) => ({
+      ...prev,
+      syncedAt: response.cloudUpdatedAt,
+      stateVersion: response.stateVersion,
+      queueCount: 0,
+      conflict: null,
+      error: null,
+    }));
+    await loadCloudRevisions();
+  };
+
   // Export
-  const exportProgressCsv = () => {
-    const header = [["tipo", "fecha", "bloque", "ejercicio", "series", "maximo_kg", "promedio_kg", "ultimo_kg", "ultimas_repeticiones", "carga_total"]];
-    const weightRows = state.weightLogs.map((entry) => ["peso", entry.date, "", "", "", "", "", Number(entry.weight) || 0, entry.waist ?? "", ""]);
-    const routineRows = routineSessions.flatMap((session) =>
-      session.exerciseRows.map((item) => [
-        "rutina", session.date, `${session.dayName} - ${session.title}`, item.name,
-        item.setsCount, item.max, item.avg, item.last.weight, item.last.reps, item.volume,
-      ])
-    );
-    const rows = [...header, ...weightRows, ...routineRows];
-    const csv = rows.map((row) => row.map((value) => `"${String(value ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const downloadBlob = (blob, filename) => {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `progreso-${todayInZone(tz)}.csv`;
+    link.download = filename;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
   };
 
+  const exportProgressCsv = () => {
+    const header = [
+      "tipo", "fecha", "dia", "rutina", "ejercicio", "serie",
+      "peso_registrado", "peso_numerico_kg", "repeticiones", "volumen_kg",
+      "peso_corporal_kg", "cintura_cm", "nota", "registrado_en",
+    ];
+    const rows = [];
+
+    Object.entries(state.trainingLogs || {}).forEach(([dayId, byDate]) => {
+      const day = state.routine.find((candidate) => candidate.id === dayId) || null;
+      const exerciseLookup = new Map(
+        (day ? getDayExercises(day, state.exercisePackages) : []).map((exercise) => [exercise.id, exercise])
+      );
+      Object.entries(byDate || {}).forEach(([date, byExercise]) => {
+        const meta = state.trainingLogMeta?.[dayId]?.[date] || {};
+        Object.entries(byExercise || {}).forEach(([exerciseId, sets]) => {
+          const exerciseName = exerciseLookup.get(exerciseId)?.name
+            || meta.exerciseNames?.[exerciseId]
+            || "Ejercicio guardado";
+          const note = state.exerciseNotes?.[dayId]?.[date]?.[exerciseId] || "";
+          (Array.isArray(sets) ? sets : []).forEach((set, setIndex) => {
+            const numericWeight = numericSetValue(set.weight);
+            const numericReps = numericSetValue(set.reps);
+            const timestamp = formatIsoTimestamp(set.ts);
+            rows.push([
+              "serie_entrenamiento",
+              date,
+              meta.dayName || day?.fullDay || "Rutina anterior",
+              meta.title || day?.title || "Sesión guardada",
+              exerciseName,
+              setIndex + 1,
+              set.weight,
+              numericWeight || "",
+              set.reps,
+              numericWeight && numericReps ? numericWeight * numericReps : "",
+              "",
+              "",
+              note,
+              timestamp,
+            ]);
+          });
+        });
+      });
+    });
+
+    state.weightLogs.forEach((entry) => {
+      rows.push([
+        "medida_corporal", entry.date, "", "", "", "", "", "", "", "",
+        Number(entry.weight) || "", entry.waist ?? "", "", formatIsoTimestamp(entry.ts),
+      ]);
+    });
+
+    state.routine.forEach((day) => {
+      getDayExercises(day, state.exercisePackages).forEach((exercise) => {
+        rows.push([
+          "plan_rutina", "", day.fullDay, day.title, exercise.name, exercise.sets,
+          "", "", exercise.reps, "", "", "", exercise.note || `Descanso: ${exercise.rest || ""}`, "",
+        ]);
+      });
+    });
+
+    rows.sort((a, b) => String(a[1] || "9999").localeCompare(String(b[1] || "9999")));
+    const csvCell = (value) => {
+      let text = String(value ?? "");
+      if (/^\s*[=+@]/.test(text) || /^\s*-[^\d.,]/.test(text)) text = `'${text}`;
+      return `"${text.replace(/"/g, '""')}"`;
+    };
+    const csv = [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n");
+    downloadBlob(
+      new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8;" }),
+      `fitapp-progreso-detallado-${todayInZone(tz)}.csv`
+    );
+  };
+
   const exportBackup = () => {
-    const payload = { exportedAt: new Date().toISOString(), app: "Fit App", state };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `anvil-copia-${todayInZone(tz)}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      app: "Fit App",
+      backupFormatVersion: 2,
+      cloudStateVersion: hasCloudAccount ? knownCloudVersionRef.current : null,
+      state: normalizeState(state),
+    };
+    downloadBlob(
+      new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }),
+      `fitapp-copia-completa-${todayInZone(tz)}.json`
+    );
   };
 
   const importBackup = async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
     try {
+      if (file.size > 10 * 1024 * 1024) throw new Error("backup-too-large");
       const text = await file.text();
       const parsed = parseJson(text, null);
-      const nextState = normalizeState(parsed?.state || parsed);
+      const candidate = parsed?.state || parsed;
+      const looksLikeBackup = candidate
+        && typeof candidate === "object"
+        && ["settings", "routine", "trainingLogs", "weightLogs"].some((key) => Object.prototype.hasOwnProperty.call(candidate, key));
+      if (!looksLikeBackup) throw new Error("invalid-backup");
+      if (!window.confirm("¿Restaurar esta copia? El estado actual quedará protegido en el historial de tu cuenta antes del cambio.")) return;
+      const nextState = normalizeState(candidate);
       setState(nextState);
       setSaveMeta(saveLocalState(nextState, scope, true));
       window.alert("Copia restaurada correctamente.");
@@ -4147,7 +4426,7 @@ export default function App() {
           </div>
           <div className="row gap-8 wrap top-8">
             <button className="btn btn-primary" type="button" onClick={addWeightLog}>Guardar peso</button>
-            <button className="btn btn-soft" type="button" onClick={exportProgressCsv}>Descargar progreso</button>
+            <button className="btn btn-soft" type="button" onClick={exportProgressCsv}>Exportar para Excel</button>
           </div>
 
           <section className="stats-grid compact top-10 stats-mini">
@@ -4320,6 +4599,7 @@ export default function App() {
               <li>Último guardado: {saveMeta.lastSavedAt ? formatDateTimeInZone(saveMeta.lastSavedAt, tz) : "--"}</li>
               <li>Guardado en: {hasCloudAccount ? "Tu cuenta" : "Este dispositivo"}</li>
               {hasCloudAccount && cloudMeta.syncedAt && <li>Última actualización: {formatDateTimeInZone(cloudMeta.syncedAt, tz)}</li>}
+              {hasCloudAccount && cloudMeta.stateVersion > 0 && <li>Versión protegida: {cloudMeta.stateVersion}</li>}
             </ul>
             {saveMeta.error && <p className="error-text">{saveMeta.error}</p>}
             {hasCloudAccount && cloudMeta.error && <p className="error-text">{cloudMeta.error}</p>}
@@ -4333,13 +4613,46 @@ export default function App() {
               </div>
             )}
             <div className="row gap-8 wrap top-10">
-              <button className="btn btn-ghost" type="button" onClick={exportBackup}>Descargar copia</button>
+              <button className="btn btn-ghost" type="button" onClick={exportBackup}>Descargar copia completa</button>
+              <button className="btn btn-soft" type="button" onClick={exportProgressCsv}>Exportar Excel (CSV)</button>
               <label className="btn btn-soft file-label">
                 Restaurar copia
                 <input type="file" accept="application/json" onChange={importBackup} />
               </label>
+              {hasCloudAccount && (
+                <button className="btn btn-soft" type="button" onClick={toggleCloudRevisions} disabled={cloudRevisionsLoading}>
+                  {cloudRevisionsLoading ? "Cargando copias..." : cloudRevisionsOpen ? "Ocultar copias seguras" : "Ver copias seguras"}
+                </button>
+              )}
               <button className="btn btn-danger" type="button" onClick={resetDefaults}>Restaurar rutina por defecto</button>
             </div>
+            {hasCloudAccount && cloudRevisionsOpen && (
+              <div className="stack gap-8 top-10">
+                <p className="muted small">Cada guardado confirmado crea una versión privada que sólo esta cuenta puede consultar.</p>
+                {!cloudRevisionsLoading && cloudRevisions.length === 0 && (
+                  <p className="muted small">Todavía no hay copias del servidor.</p>
+                )}
+                {cloudRevisions.map((revision) => (
+                  <div className="log-row" key={revision.revision_id}>
+                    <div>
+                      <strong>Versión {revision.state_version}</strong>
+                      <p className="muted small">
+                        {formatDateTimeInZone(revision.created_at, tz)}
+                        {revision.reason === "restore" ? " · restauración" : revision.reason === "migration" ? " · copia inicial" : " · guardado"}
+                      </p>
+                    </div>
+                    <button
+                      className="btn btn-ghost btn-mini"
+                      type="button"
+                      disabled={cloudRevisionsLoading || Number(revision.state_version) === Number(cloudMeta.stateVersion)}
+                      onClick={() => restoreServerRevision(revision)}
+                    >
+                      {Number(revision.state_version) === Number(cloudMeta.stateVersion) ? "Actual" : "Restaurar"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </article>
 
           <article className="card top-12">

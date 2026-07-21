@@ -3812,7 +3812,7 @@ export default function App() {
     <div className="app-shell">
       <header className="hero">
         <div className="hero-brand">
-          <BrandLogo size={42} />
+          <BrandLogo size={42} className="brand-logo-header" />
           <div className="hero-text">
             <h1>Anvil</h1>
             <p className="hero-sub">{displayName}{latestWeight ? ` · ${latestWeight.toFixed(1)}kg` : ""}{state.settings.goalWeight ? ` · meta ${state.settings.goalWeight}kg` : ""}</p>
@@ -3870,6 +3870,7 @@ export default function App() {
                   <path d="M7 3.5v4M17 3.5v4M3.5 9.5h17" fill="none" stroke="currentColor" strokeWidth="1.8" />
                   <circle cx="12" cy="14.5" r="2.2" fill="currentColor" />
                 </svg>
+                <span>Hoy</span>
               </button>
             </div>
             <p className="muted small top-6">Hoy se actualiza solo a medianoche.</p>
@@ -4417,19 +4418,34 @@ export default function App() {
       )}
 
       {tab === "progreso" && (
-        <section className="panel">
-          <h2>Progreso</h2>
-          <div className="grid-three top-8">
-            <Field label="Fecha" type="date" value={weightForm.date} onChange={(value) => setWeightForm((prev) => ({ ...prev, date: value }))} />
-            <Field label="Peso (kg)" type="number" step="0.1" value={weightForm.weight} onChange={(value) => setWeightForm((prev) => ({ ...prev, weight: value }))} placeholder="78.3" />
-            <Field label="Cintura (cm)" type="number" step="0.1" value={weightForm.waist} onChange={(value) => setWeightForm((prev) => ({ ...prev, waist: value }))} placeholder="Opcional" />
-          </div>
-          <div className="row gap-8 wrap top-8">
-            <button className="btn btn-primary" type="button" onClick={addWeightLog}>Guardar peso</button>
-            <button className="btn btn-soft" type="button" onClick={exportProgressCsv}>Exportar para Excel</button>
-          </div>
+        <section className="panel progress-panel">
+          <header className="progress-intro">
+            <div>
+              <p className="progress-kicker">TU EVOLUCIÓN</p>
+              <h2>Progreso</h2>
+            </div>
+            <p className="muted small">Registra tus medidas y revisa cómo avanzas.</p>
+          </header>
 
-          <section className="stats-grid compact top-10 stats-mini">
+          <article className="progress-entry-card top-12">
+            <div className="progress-entry-head">
+              <h4>Nuevo registro</h4>
+              <span className="progress-entry-badge">HOY</span>
+            </div>
+            <div className="progress-form-grid top-10">
+              <div className="progress-form-date">
+                <Field label="Fecha" type="date" value={weightForm.date} onChange={(value) => setWeightForm((prev) => ({ ...prev, date: value }))} />
+              </div>
+              <Field label="Peso (kg)" type="number" step="0.1" value={weightForm.weight} onChange={(value) => setWeightForm((prev) => ({ ...prev, weight: value }))} placeholder="78.3" />
+              <Field label="Cintura (cm)" type="number" step="0.1" value={weightForm.waist} onChange={(value) => setWeightForm((prev) => ({ ...prev, waist: value }))} placeholder="Opcional" />
+            </div>
+            <div className="progress-actions top-10">
+              <button className="btn btn-primary" type="button" onClick={addWeightLog}>Guardar peso</button>
+              <button className="btn btn-soft" type="button" onClick={exportProgressCsv}>Exportar Excel</button>
+            </div>
+          </article>
+
+          <section className="stats-grid compact top-12 progress-stats">
             <StatCard label="Racha actual" value={`${streakInfo.current}`} meta={streakInfo.current === 1 ? "día seguido" : "días seguidos"} tone="accent" />
             <StatCard label="Mejor racha" value={`${streakInfo.best}`} meta="histórica" tone="good" />
             <StatCard label="Peso actual" value={latestWeight ? `${latestWeight.toFixed(1)}kg` : "--"} meta="Más reciente" tone="warning" />

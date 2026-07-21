@@ -105,6 +105,25 @@ body {
   filter: drop-shadow(0 6px 10px #ff101952);
 }
 
+.brand-logo-header {
+  width: 54px;
+  height: 42px;
+  flex-basis: 54px;
+  overflow: hidden;
+  position: relative;
+}
+
+.brand-logo-header img {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 96px;
+  height: 96px;
+  object-fit: contain;
+  transform: translate(-50%, -50%);
+  filter: drop-shadow(0 5px 9px #ff101966);
+}
+
 .hero-text {
   min-width: 0;
 }
@@ -1089,7 +1108,7 @@ textarea.input {
 
 .date-control-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 42px;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
   width: 100%;
@@ -1098,20 +1117,22 @@ textarea.input {
 .date-input-main {
   min-width: 0;
   width: 100%;
+  max-width: 100%;
+  display: block;
 }
 
 .btn-date-icon {
-  min-width: 42px;
-  width: 42px;
-  min-height: 42px;
-  height: 42px;
-  padding: 0;
+  min-width: 68px;
+  min-height: 46px;
+  height: 46px;
+  padding: 0 12px;
   border-radius: 11px;
 }
 
 .btn-date-icon svg {
   width: 18px;
   height: 18px;
+  flex: 0 0 18px;
   display: block;
 }
 
@@ -1122,18 +1143,122 @@ textarea.input {
 
 .gate-sub { margin: 0 0 10px; color: var(--muted); }
 
-.stats-mini .stat-card {
-  padding: 8px;
-  border-radius: 10px;
+.progress-panel {
+  padding: 14px;
 }
 
-.stats-mini .stat-value {
-  font-size: 15px;
-  margin-top: 4px;
+.progress-intro {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
 }
 
-.stats-mini .stat-meta {
-  font-size: 11px;
+.progress-intro .muted {
+  max-width: 190px;
+  text-align: right;
+}
+
+.progress-kicker {
+  margin: 0 0 5px;
+  color: var(--accent-strong);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.progress-entry-card {
+  border: 1px solid #4a2d33;
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(80% 90% at 100% 0%, #4b0c142e 0%, transparent 65%),
+    linear-gradient(160deg, #1b1517 0%, #100d0e 100%);
+  padding: 14px;
+  box-shadow: var(--shadow-sm);
+}
+
+.progress-entry-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.progress-entry-badge {
+  border: 1px solid #6d3038;
+  border-radius: 999px;
+  background: #390c13;
+  color: #ffb8bd;
+  padding: 4px 8px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.progress-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.progress-form-grid > *,
+.progress-form-grid .input {
+  min-width: 0;
+}
+
+.progress-form-date {
+  grid-column: 1 / -1;
+}
+
+.progress-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.progress-actions .btn {
+  width: 100%;
+  min-width: 0;
+  padding-inline: 10px;
+}
+
+.progress-stats {
+  gap: 10px;
+}
+
+.progress-stats .stat-card {
+  min-height: 102px;
+  padding: 13px 12px;
+  border-radius: 13px;
+}
+
+.progress-stats .stat-value {
+  margin-top: 8px;
+  font-size: 22px;
+}
+
+.progress-stats .stat-meta {
+  font-size: 11.5px;
+}
+
+@media (max-width: 360px) {
+  .progress-intro {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .progress-intro .muted {
+    max-width: none;
+    text-align: left;
+  }
+
+  .progress-actions .btn {
+    font-size: 12.5px;
+    padding-inline: 7px;
+  }
 }
 
 @media (min-width: 680px) {

@@ -41,7 +41,7 @@ function allowedAdminEmails() {
 }
 
 function inviteRedirectUrl() {
-  const configured = Deno.env.get("ANVIL_APP_URL") || "https://fit-app-lac.vercel.app/";
+  const configured = Deno.env.get("ANVIL_APP_URL") || "https://anvill.up.railway.app/";
   const url = new URL(configured);
   url.searchParams.set("invite", "1");
   return url.toString();

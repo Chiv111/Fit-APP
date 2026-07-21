@@ -43,7 +43,7 @@ Las migraciones versionadas están en `supabase/migrations/`.
 La función `supabase/functions/invite-user` permite enviar invitaciones desde Ajustes. La función exige una sesión válida y vuelve a comprobar en el servidor que el correo del remitente esté incluido en `INVITE_ADMIN_EMAILS`; la clave administrativa de Supabase nunca llega al navegador.
 
 ```bash
-supabase secrets set INVITE_ADMIN_EMAILS=sebastianrdzj@gmail.com ANVIL_APP_URL=https://fit-app-lac.vercel.app
+supabase secrets set INVITE_ADMIN_EMAILS=sebastianrdzj@gmail.com ANVIL_APP_URL=https://anvill.up.railway.app
 supabase functions deploy invite-user --project-ref boejvavrpolvtabunddo --use-api
 ```
 
